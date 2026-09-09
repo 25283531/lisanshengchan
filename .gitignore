@@ -1,0 +1,22 @@
+
+# dependencies and builds
+node_modules/
+apps/**/node_modules/
+apps/**/dist/
+apps/**/__pycache__/
+*.py[cod]
+
+# local configuration and data
+.env
+*.local
+postgres_data/
+redis_data/
+
+# editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
