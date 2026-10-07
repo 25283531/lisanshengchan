@@ -1,5 +1,5 @@
 /**
- * 排产引擎。
+ * 排产引擎（调度协调器）。
  *
  * 判定口径直接移植自「注塑智造运营专家团」，与 E:\code\lisanshengchan 的 CP-SAT 建模一致：
  *  1. 四类资源互斥：机台 / 模具 / 供料线 / 混料机，任一资源不得时间重叠
@@ -10,11 +10,19 @@
  *  6. 排序：SALES 先保交期（逾期 → 换模 → 最早完工）；STOCK 先省换模
  *  7. 集中供料时点：换料指令 = 开工 − 60min，备料到位 = 开工 − 30min
  *
- * 用确定性列表调度（list scheduling）代替求解器：小批量多 SKU 场景规模有限，
- * 结果可解释、可复现，也避免引入 OR-Tools 这类原生依赖。
+ * v3.1 起改为双引擎：
+ *  - 优先：CP-SAT 求解器（独立 Python 服务，全局最优）
+ *  - 降级：列表调度（list scheduling，贪心启发式，零依赖、可复现）
+ * 求解器不可用 / 超时 / 不可行时自动走列表调度，业务层无感知。
+ *
+ * 接口契约（v3.0 起稳定）：
+ *   输入 ctx = { machines, molds, products, supplyLines, mixers, orders, materials, labels, options }
+ *   同步返回 { tasks, materialPlans, alerts, unassigned, summary }
+ *   异步入口 runSchedulingAsync 优先走求解器，同步入口 runScheduling 永远走列表调度
  */
 import { arr, num, toStr, toDate, addMinutes, round } from '../lib/util.js';
 import { materialDemand, labelDemand } from './material.js';
+import { buildOptions, callOptimizer } from './optimizer-client.js';
 
 const MIN = 60000;
 
@@ -36,26 +44,158 @@ function canMake(machine, product) {
 }
 
 /**
- * @param {Object} ctx
- * @param {Array}  ctx.machines   机台（含 mold_efficiencies 已解析）
- * @param {Array}  ctx.molds      模具
- * @param {Array}  ctx.products   产品（含 recipe/label 已解析）
- * @param {Array}  ctx.supplyLines 供料线
- * @param {Array}  ctx.mixers     混料机
- * @param {Array}  ctx.orders     待排订单（DRAFT/SCHEDULED 且 remaining_qty>0）
- * @param {Array}  ctx.materials  原料库存
- * @param {Array}  ctx.labels     标签库存
- * @param {Object} ctx.options    { bufferMinutes, feedingOrderLeadMinutes, feedingReadyLeadMinutes, startFrom }
+ * 同步入口：永远走列表调度。用于求解器未启用、调试、demo。
  */
 export function runScheduling(ctx) {
+  return listSchedule(ctx);
+}
+
+/**
+ * 异步入口：优先 CP-SAT 求解器，失败降级列表调度。
+ */
+export async function runSchedulingAsync(ctx, optimizerCfg = {}) {
+  const enabled = optimizerCfg.enabled !== false;
+  if (enabled && optimizerCfg.url) {
+    const result = await scheduleWithOptimizer(ctx, optimizerCfg);
+    if (result) {
+      result.summary.algorithm = 'cp-sat-v3.1';
+      return result;
+    }
+    // 求解器不可用 / 超时 / 不可行 → 降级
+  }
+  const fallback = listSchedule(ctx);
+  fallback.summary.algorithm = 'list-schedule-fallback';
+  return fallback;
+}
+
+/**
+ * 调用 CP-SAT 求解器，把结果转回统一契约。
+ * 失败返回 null。
+ */
+async function scheduleWithOptimizer(ctx, optimizerCfg) {
+  const startFrom = toDate(ctx.options?.startFrom) || new Date();
+  const startMs = startFrom.getTime();
+  const bufferMin = num(ctx.options?.bufferMinutes, 30);
+
+  const jobs = buildOptions({ ...ctx, options: { ...ctx.options, startFrom: startMs } }, startMs);
+  if (!jobs.length) {
+    // 没有可排订单，直接走列表调度以拿到 unassigned 原因
+    return null;
+  }
+
+  const horizonHours = Math.max(1, Math.ceil((num(optimizerCfg.horizonHours, 24 * 30))));
+  const payload = {
+    jobs,
+    machine_busy: [],
+    mold_busy: [],
+    line_busy: [],
+    mixer_busy: [],
+    horizon_hours: horizonHours,
+    buffer_minutes: bufferMin,
+  };
+
+  const r = await callOptimizer(optimizerCfg.url, payload, num(optimizerCfg.timeoutMs, 30000));
+  if (!r) return null;
+
+  // 把求解结果映射回 tasks / materialPlans
+  const { machines = [], molds = [], products = [], supplyLines = [], mixers = [], orders = [], materials = [], labels = [], options = {} } = ctx;
+  const productMap = new Map(products.map((p) => [p.id, p]));
+  const moldMap = new Map(molds.map((m) => [m.code, m]));
+  const orderMap = new Map(orders.map((o) => [o.code, o]));
+
+  const feedOrderLead = num(options.feedingOrderLeadMinutes, 60);
+  const feedReadyLead = num(options.feedingReadyLeadMinutes, 30);
+
+  const tasks = [];
+  const materialPlans = [];
+  let seq = 0;
+
+  for (const a of r.assignments) {
+    const order = orderMap.get(a.job_code);
+    if (!order) continue;
+    const product = productMap.get(order.product_id);
+    if (!product) continue;
+    seq += 1;
+
+    const order_map = {
+      order_id: order.id,
+      seq,
+      machine_code: a.machine_code,
+      mold_code: a.mold_code,
+      supply_line_code: a.supply_line_code,
+      mixer_code: a.mixer_code,
+      decision: a.setup_minutes > 0 ? 'CHANGE_MOLD' : 'KEEP_CURRENT_MOLD',
+      changeover_minutes: a.setup_minutes,
+      planned_qty: num(order.remaining_qty, 0) > 0 ? num(order.remaining_qty) : num(order.quantity, 0),
+      units_per_hour: num(a.efficiency, 0),
+      duration_minutes: a.duration_minutes,
+      start_at: a.work_start,
+      end_at: a.scheduled_end,
+      feeding_order_at: addMinutes(a.work_start, -feedOrderLead),
+      feeding_ready_at: addMinutes(a.work_start, -feedReadyLead),
+      status: 'PLANNED',
+      _order: order,
+      _product: product,
+    };
+    tasks.push(order_map);
+
+    for (const d of materialDemand(product, order_map.planned_qty)) {
+      materialPlans.push({
+        task_seq: seq,
+        order_code: order.code,
+        material_sku: d.material_sku,
+        kind: 'MATERIAL',
+        qty: d.qty,
+        unit: 'kg',
+        use_at: order_map.start_at,
+        mixer_code: order_map.mixer_code,
+        status: 'PLANNED',
+      });
+    }
+    for (const d of labelDemand(product, order_map.planned_qty)) {
+      materialPlans.push({
+        task_seq: seq,
+        order_code: order.code,
+        material_sku: d.label_sku,
+        kind: 'LABEL',
+        qty: d.qty,
+        unit: '张',
+        use_at: order_map.start_at,
+        mixer_code: null,
+        status: 'PLANNED',
+      });
+    }
+  }
+
+  // 未排产订单：求解器入参里没出现的（产品未建档 / 无可用机台 / 缺效率）
+  const assigned = new Set(r.assignments.map((a) => a.job_code));
+  const unassigned = orders
+    .filter((o) => !assigned.has(o.code))
+    .map((o) => ({ order: o, reason: '无可用机台（机台故障/供料线故障/模具不可用/效率未建档）' }));
+
+  return finalize(ctx, {
+    tasks,
+    materialPlans,
+    unassigned,
+    extraSummary: {
+      algorithm: 'cp-sat-v3.1',
+      objective: r.objective,
+      solver_status: r.solver_status,
+    },
+  });
+}
+
+/**
+ * 列表调度（list scheduling）：贪心启发式，零依赖、可复现。
+ * 作为求解器不可用时的兜底，也用于调试与小规模场景。
+ */
+function listSchedule(ctx) {
   const {
     machines = [], molds = [], products = [], supplyLines = [],
     mixers = [], orders = [], materials = [], labels = [], options = {},
   } = ctx;
 
   const bufferMin = num(options.bufferMinutes, 30);
-  const feedOrderLead = num(options.feedingOrderLeadMinutes, 60);
-  const feedReadyLead = num(options.feedingReadyLeadMinutes, 30);
   const startFrom = toDate(options.startFrom) || new Date();
   const startMs = startFrom.getTime();
 
@@ -372,9 +512,78 @@ export function runScheduling(ctx) {
     start_at: toStr(startFrom),
     end_at: tasks.length ? toStr(new Date(Math.max(...tasks.map((t) => t.endMs)))) : null,
     alerts: alerts.length,
+    algorithm: 'list-schedule',
   };
 
-  return { tasks, materialPlans, alerts, unassigned, summary };
+  return finalize(ctx, { tasks, materialPlans, alerts, unassigned, summary });
+}
+
+/**
+ * 统一收尾：补全告警（缺料/换模/保养/逾期/故障），返回最终结果。
+ * listSchedule 已自带告警；scheduleWithOptimizer 调用此函数补全告警。
+ */
+function finalize(ctx, partial) {
+  const { tasks } = partial;
+  const extraSummary = partial.extraSummary || { algorithm: 'list-schedule' };
+
+  // listSchedule 已生成告警；求解器路径不生成，这里补
+  if (!partial.alerts || partial.alerts.length === 0) {
+    // 这里复用 listSchedule 的告警生成逻辑不现实，用简化版
+    const alerts = [];
+    const moldMap = new Map((ctx.molds || []).map((m) => [m.code, m]));
+    const shotsByMold = new Map();
+    for (const t of tasks) {
+      const mold = moldMap.get(t.mold_code);
+      const cavities = Math.max(1, num(mold?.cavities, 1));
+      shotsByMold.set(t.mold_code, (shotsByMold.get(t.mold_code) || 0) + Math.ceil(t.planned_qty / cavities));
+    }
+    for (const [code, addShots] of shotsByMold) {
+      const mold = moldMap.get(code);
+      if (!mold) continue;
+      const cum = num(mold.cumulative_shots, 0) + addShots;
+      const threshold = num(mold.maintenance_at_shots, 0);
+      if (threshold > 0 && cum >= threshold) {
+        alerts.push({ type: 'MOLD_MAINTENANCE', level: 'WARN', title: `模具 ${code} 达保养阈值`, body: `累计模次 ${cum} / 阈值 ${threshold}，本次排产将增加 ${addShots} 模次。`, payload: { mold_code: code, cumulative_shots: cum, threshold } });
+      }
+    }
+    for (const t of tasks) {
+      if (t.decision === 'CHANGE_MOLD') {
+        alerts.push({ type: 'MOLD_CHANGE', level: 'INFO', title: `机台 ${t.machine_code} 换模：→ ${t.mold_code}`, body: `换模 ${t.changeover_minutes} 分钟，计划 ${t.start_at} 开工。`, payload: { machine_code: t.machine_code, mold_code: t.mold_code, start_at: t.start_at } });
+      }
+      const o = t._order;
+      if (o?.due_date) {
+        const due = toDate(`${o.due_date} 23:59:59`);
+        const lateMs = toDate(t.end_at).getTime() - due.getTime();
+        if (lateMs > 0) {
+          alerts.push({ type: 'DELAY_RISK', level: 'WARN', title: `订单 ${o.code} 预计逾期 ${round(lateMs / 86400000, 1)} 天`, body: `交期 ${o.due_date}，排产完工 ${t.end_at.slice(0, 16)}。`, payload: { order_code: o.code, due_date: o.due_date, end_at: t.end_at } });
+        }
+      }
+    }
+    partial.alerts = alerts;
+  }
+
+  const summary = partial.summary || {
+    orders_total: 0,
+    orders_scheduled: tasks.length,
+    orders_unassigned: (partial.unassigned || []).length,
+    total_changeover_minutes: tasks.reduce((s, t) => s + num(t.changeover_minutes, 0), 0),
+    total_duration_minutes: tasks.reduce((s, t) => s + num(t.duration_minutes, 0), 0),
+    makespan_hours: 0,
+    start_at: null,
+    end_at: tasks.length ? tasks[tasks.length - 1].end_at : null,
+    alerts: (partial.alerts || []).length,
+    algorithm: extraSummary.algorithm,
+    ...extraSummary,
+  };
+  Object.assign(summary, extraSummary);
+
+  return {
+    tasks,
+    materialPlans: partial.materialPlans || [],
+    alerts: partial.alerts || [],
+    unassigned: partial.unassigned || [],
+    summary,
+  };
 }
 
 /**

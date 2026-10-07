@@ -1,5 +1,30 @@
 # 更新日志
 
+## v3.1.0（标签 `v3.1`）
+
+排产引擎升级为 **CP-SAT 求解器**，从贪心启发式改为全局最优化搜索。
+
+**新增 `molding-mes/optimizer/`**：独立的 Python 求解器微服务（FastAPI + OR-Tools CP-SAT）
+
+- 建模：每张订单展开成多个候选资源 option（机台×模具×供料线×混料机），
+  用 `NewOptionalIntervalVar` + `NewBoolVar` 表达"选且仅选一个"，
+  四类资源各自 `AddNoOverlap` 保证时间不重叠
+- 目标函数（沿用 lisanshengchan 口径）：
+  `Σ(逾期分钟 × 权重) + Σ(换模时长) + Σ(完工时刻 × 完工权重)`
+  SALES 权重 `100 + priority×10`，STOCK 权重 `20 + priority×5`，完工权重 SALES 5 / STOCK 1
+- 求解参数：10 秒上限、8 线程；返回 `OPTIMAL` / `FEASIBLE` 与目标值
+
+**服务端改造**（`scheduler.js` 升级为调度协调器）
+
+- 新增 `domain/optimizer-client.js`：展开候选 options + HTTP 调求解器
+- 双引擎：异步入口 `runSchedulingAsync()` 优先调求解器；同步入口 `runScheduling()` 始终走列表调度
+- **自动降级**：求解器未配置 / 连不上 / 超时 / 不可行 → 回退列表调度，业务层无感知
+- 配置新增 `optimizer` 段：`OPTIMIZER_ENABLED` / `OPTIMIZER_URL` / `OPTIMIZER_TIMEOUT_MS` / `OPTIMIZER_HORIZON_HOURS`
+- `summary` 增加 `algorithm`（`cp-sat-v3.1` / `list-schedule-fallback`）、`objective`、`solver_status`，便于判断本轮用了哪条路径
+- 接口契约（入参 ctx、出参 tasks/materialPlans/alerts/unassigned/summary）保持不变，安卓端与前台零改动
+
+**部署**：`docker-compose.yml` 增加 `optimizer` 服务；`optimizer/Dockerfile` + `requirements.txt`
+
 ## v3.0.0（标签 `v3.0`）
 
 新增 C/S 架构的注塑生产协同 MES，位于 `molding-mes/`，与旧版 B/S 系统相互独立。

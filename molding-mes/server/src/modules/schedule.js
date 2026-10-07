@@ -5,7 +5,7 @@ import { wrap, ok, fail } from '../lib/http.js';
 import { nowStr, num, j, toStr, toDate, round } from '../lib/util.js';
 import { loadTenantData, normalizeData, audit } from '../lib/repo.js';
 import { requirePerm } from '../middleware.js';
-import { runScheduling, shiftPlan } from '../domain/scheduler.js';
+import { runScheduling, runSchedulingAsync, shiftPlan } from '../domain/scheduler.js';
 import { pushScheduleNotifications, pushShiftPlan } from '../domain/notify.js';
 
 async function loadOrders(db, tenantId, onlyIds = null) {
@@ -21,7 +21,7 @@ export async function runAndPersistSchedule(db, ctx, tid, userId, { startFrom = 
   const data = normalizeData(await loadTenantData(db, tid));
   const orders = await loadOrders(db, tid);
 
-    const result = runScheduling({
+    const result = await runSchedulingAsync({
       ...data,
       orders,
       options: {
@@ -30,7 +30,7 @@ export async function runAndPersistSchedule(db, ctx, tid, userId, { startFrom = 
         feedingReadyLeadMinutes: ctx.config.schedule.feedingReadyLeadMinutes,
         startFrom: startFrom || toStr(new Date()),
       },
-    });
+    }, ctx.config.optimizer);
 
     let savedTasks = 0;
     let savedPlans = 0;

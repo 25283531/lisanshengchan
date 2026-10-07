@@ -85,6 +85,14 @@ export const config = {
   /** 是否静态托管管理后台 */
   serveAdminWeb: bool(process.env.SERVE_ADMIN_WEB, true),
   adminWebDir: process.env.ADMIN_WEB_DIR || resolve(ROOT, '..', 'admin-web'),
+
+  /** 排产求解器（v3.1 新增） */
+  optimizer: {
+    enabled: bool(process.env.OPTIMIZER_ENABLED, true),
+    url: process.env.OPTIMIZER_URL || 'http://127.0.0.1:8090',
+    timeoutMs: num(process.env.OPTIMIZER_TIMEOUT_MS, 30000),
+    horizonHours: num(process.env.OPTIMIZER_HORIZON_HOURS, 24 * 30),
+  },
 };
 
 export default config;

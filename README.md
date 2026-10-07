@@ -6,21 +6,30 @@
 
 | 版本 | 代码位置 | 形态 | 说明 |
 | --- | --- | --- | --- |
-| v3.0（当前） | `molding-mes/` | C/S 架构：Node.js + Fastify 服务端、Android（Kotlin + Compose）客户端、平台管理后台 | 多租户 SaaS 化 MES：授权与席位管理、RBAC 五类角色、AI 自然语言下单、自动排产与角色化通知、交接班与报工。详见 [`molding-mes/README.md`](molding-mes/README.md) |
+| v3.1（当前） | `molding-mes/` | 同上 + Python CP-SAT 求解器 | 排产升级为 OR-Tools CP-SAT 全局最优化；求解器不可用时自动降级到内置列表调度。详见 [`molding-mes/README.md`](molding-mes/README.md) |
+| v3.0 | `molding-mes/` | C/S 架构：Node.js + Fastify 服务端、Android（Kotlin + Compose）客户端、平台管理后台 | 多租户 SaaS 化 MES：授权与席位管理、RBAC 五类角色、AI 自然语言下单、自动排产与角色化通知、交接班与报工 |
 | v1.x / v2.x | 仓库根目录（`apps/web`、`apps/api`、`apps/scheduler`、`compose.yaml`） | B/S 架构：React + NestJS + Python FastAPI | 早期单机版排产系统，保留用于回溯；部署方式见下文 |
 
 > v3.0 与旧版相互独立：旧版继续用根目录的 `compose.yaml` 部署，新版用 `molding-mes/docker-compose.yml`，两者数据模型不互通。
 
-### v3.0 快速开始
+### v3.1 快速开始
 
 ```bash
+# 1) 排产求解器（可选，不启动则自动降级到内置列表调度）
+cd molding-mes/optimizer
+pip install -r requirements.txt
+uvicorn main:app --host 127.0.0.1 --port 8090
+
+# 2) 服务端
 cd molding-mes/server
-cp .env.example .env        # 修改 JWT_SECRET、PLATFORM_TOKEN
+cp .env.example .env        # 修改 JWT_SECRET、PLATFORM_TOKEN；确认 OPTIMIZER_URL
 npm install
 npm run migrate             # 建表（sqlite 或 mysql，由 DB_DIALECT 决定）
 npm run seed                # 写入演示数据
 npm start                   # 服务端，默认 http://localhost:8080
 ```
+
+排产结果的 `summary.algorithm` 会标明本轮用了哪条路径：`cp-sat-v3.1`（求解器）或 `list-schedule-fallback`（降级）。
 
 管理后台访问 `http://localhost:8080/admin`，安卓客户端用 Android Studio 打开 `molding-mes/android` 编译。
 

@@ -1,5 +1,16 @@
-# 生产用 MySQL 实例。开发环境可继续用内置 SQLite（DB_DIALECT=sqlite），无需启动本服务。
+# 生产用 MySQL 实例 + CP-SAT 排产求解器。
+# 开发环境可继续用内置 SQLite（DB_DIALECT=sqlite），并可不启动 optimizer
+# （此时服务端自动降级到内置列表调度）。
 services:
+  optimizer:
+    build: ./optimizer
+    container_name: molding-mes-optimizer
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "8090:8090"
+
   mysql:
     image: mysql:8.0
     container_name: molding-mes-mysql
