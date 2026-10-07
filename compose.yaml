@@ -14,11 +14,13 @@ services:
       DB_NAME: ${POSTGRES_DB:-mes}
       DB_USER: ${POSTGRES_USER:-mes}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      OPTIMIZER_URL: ${OPTIMIZER_URL:-http://optimizer:8000}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+      optimizer: { condition: service_started }
     restart: unless-stopped
   optimizer:
     build: ./apps/scheduler

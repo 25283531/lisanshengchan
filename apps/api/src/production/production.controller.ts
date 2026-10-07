@@ -25,14 +25,18 @@ export class ProductionController {
     @Patch('supply-lines/:code') updateSupplyLine(@Param('code') code: string, @Body() data: any) { return this.service.updateSupplyLine(code, data); }
   @Delete('supply-lines/:code') deleteSupplyLine(@Param('code') code: string) { return this.service.deleteSupplyLine(code); }  @Post('schedule/recommend') recommend(@Body() data: { productSku: string; quantity: number; dueDate?: string | null; orderType?: 'SALES' | 'STOCK'; priorityScore?: number }) { return this.service.recommend(data); }
   @Post('schedule/batch-recommend') batchRecommend(@Body() data: { orders: { productSku: string; quantity: number; dueDate?: string | null; orderType?: 'SALES' | 'STOCK'; priorityScore?: number }[] }) { return this.service.batchRecommend(data); }
+  @Post('work-orders/batch') createBatchOrders(@Body() data: { orders: { productSku: string; quantity: number; dueDate?: string | null; orderType?: 'SALES' | 'STOCK'; priorityScore?: number }[] }) { return this.service.createBatchOrders(data); }
   @Get('work-orders') workOrders() { return this.service.listOrders(); }
   @Get('faults') faults() { return this.service.listFaults(); }
+  @Patch('work-orders/:id/progress') reportProgress(@Param('id') id: string, @Body() body: { completedQuantity: number }) { return this.service.reportProgress(id, Number(body.completedQuantity)); }
+  @Post('work-orders/:id/confirm-overdue') confirmOverdue(@Param('id') id: string) { return this.service.confirmOverdueCompletion(id); }
   @Post('work-orders') createOrder(@Body() data: { productSku: string; quantity: number; dueDate?: string | null; orderType?: 'SALES' | 'STOCK'; priorityScore?: number }) { return this.service.createOrder(data); }
   @Patch('work-orders/:id/schedule') updateSchedule(@Param('id') id: string, @Body() data: { machineCode: string; supplyLineCode: string; moldCode?: string; scheduledStart: string; scheduledEnd: string }) { return this.service.updateSchedule(id, data); }
   @Post('work-orders/:id/split') splitOrder(@Param('id') id: string, @Body() data: { quantity: number }) { return this.service.splitOrder(id, Number(data.quantity)); }
   @Post('faults') createFault(@Body() data: { resourceType: 'MACHINE' | 'SUPPLY_LINE'; resourceCode: string; note: string; estimatedHours: number }) { return this.service.createFault(data); }
   @Post('faults/:id/resolve') resolveFault(@Param('id') id: string) { return this.service.resolveFault(id); }
 }
+
 
 
 

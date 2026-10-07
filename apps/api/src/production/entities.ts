@@ -6,6 +6,7 @@ export class Product {
   @Column({ unique: true }) sku!: string;
   @Column() name!: string;
   @Column() logoVersion!: string;
+  @Column({ type: 'integer', default: 0 }) finishedStockQuantity!: number;
   @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 }) lossRate!: number;
   @Column({ type: 'jsonb' }) recipe!: { materialSku: string; gramsPerUnit: number }[];
   @Column({ type: 'jsonb', default: [] }) moldCodes!: string[];
@@ -55,6 +56,7 @@ export class SupplyLine {
   @Column() name!: string;
   @Column({ type: 'jsonb', default: [] }) machineCodes!: string[];
   @Column() recipeKey!: string;
+  @Column({ nullable: true }) mixerCode!: string | null;
   @Column({ default: 60 }) minChangeoverMinutes!: number;
   @Column({ type: 'timestamptz', nullable: true }) occupiedUntil!: Date | null;
   @Column({ default: 'AVAILABLE' }) status!: 'AVAILABLE' | 'FAULT' | 'MAINTENANCE';
@@ -66,6 +68,7 @@ export class WorkOrder {
   @Column({ unique: true }) code!: string;
   @Column() productSku!: string;
   @Column({ type: 'integer' }) quantity!: number;
+  @Column({ type: 'integer', default: 0 }) completedQuantity!: number;
   @Column({ type: 'date', nullable: true }) dueDate!: string | null;
   @Column({ default: 'SALES' }) orderType!: 'SALES' | 'STOCK';
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 }) priorityScore!: number;
@@ -102,6 +105,7 @@ export class InventoryTransaction {
   @Column({ nullable: true }) note!: string | null;
   @CreateDateColumn() createdAt!: Date;
 }
+
 
 
 
