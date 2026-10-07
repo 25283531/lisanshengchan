@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+server/node_modules/
+
+# local runtime data (sqlite demo database)
+server/data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+
+# local configuration
+.env
+.env.*
+!.env.example
+*.local
+
+# logs
+*.log
+
+# android build outputs
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+
+# editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

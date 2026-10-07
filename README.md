@@ -2,7 +2,29 @@
 
 面向 PP 注塑包装盒工厂的生产排产系统，包含产品/BOM、原料库存、设备与模具效率矩阵、供料线、订单/工单、故障、排产建议、甘特图和报工看板。
 
-## 系统组成
+## 版本说明
+
+| 版本 | 代码位置 | 形态 | 说明 |
+| --- | --- | --- | --- |
+| v3.0（当前） | `molding-mes/` | C/S 架构：Node.js + Fastify 服务端、Android（Kotlin + Compose）客户端、平台管理后台 | 多租户 SaaS 化 MES：授权与席位管理、RBAC 五类角色、AI 自然语言下单、自动排产与角色化通知、交接班与报工。详见 [`molding-mes/README.md`](molding-mes/README.md) |
+| v1.x / v2.x | 仓库根目录（`apps/web`、`apps/api`、`apps/scheduler`、`compose.yaml`） | B/S 架构：React + NestJS + Python FastAPI | 早期单机版排产系统，保留用于回溯；部署方式见下文 |
+
+> v3.0 与旧版相互独立：旧版继续用根目录的 `compose.yaml` 部署，新版用 `molding-mes/docker-compose.yml`，两者数据模型不互通。
+
+### v3.0 快速开始
+
+```bash
+cd molding-mes/server
+cp .env.example .env        # 修改 JWT_SECRET、PLATFORM_TOKEN
+npm install
+npm run migrate             # 建表（sqlite 或 mysql，由 DB_DIALECT 决定）
+npm run seed                # 写入演示数据
+npm start                   # 服务端，默认 http://localhost:8080
+```
+
+管理后台访问 `http://localhost:8080/admin`，安卓客户端用 Android Studio 打开 `molding-mes/android` 编译。
+
+## 系统组成（v1.x / v2.x 旧版）
 
 - `apps/web`：React + TypeScript + Vite 前端，Nginx 提供静态页面并反向代理 `/api`。
 - `apps/api`：NestJS + TypeORM 业务 API，启动时执行数据库迁移。

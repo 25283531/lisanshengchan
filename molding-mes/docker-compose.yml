@@ -1,0 +1,28 @@
+# 生产用 MySQL 实例。开发环境可继续用内置 SQLite（DB_DIALECT=sqlite），无需启动本服务。
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: molding-mes-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: molding_mes
+      MYSQL_USER: mes
+      MYSQL_PASSWORD: mes123456
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pmes123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql-data:
