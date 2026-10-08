@@ -317,8 +317,9 @@ async function saveDraft(db, { tenantId, userId, target, source, rawText, fileNa
     delete c._row;
     return c;
   });
+  // 列名一律加反引号：rows 在 MySQL 8 里是保留字（窗口函数），不加引号会语法错误
   const r = await db.run(
-    `INSERT INTO intake_drafts (tenant_id, target, source, raw_text, file_name, rows, row_count, status, used_fallback, message, created_by, created_at, updated_at)
+    `INSERT INTO intake_drafts (\`tenant_id\`, \`target\`, \`source\`, \`raw_text\`, \`file_name\`, \`rows\`, \`row_count\`, \`status\`, \`used_fallback\`, \`message\`, \`created_by\`, \`created_at\`, \`updated_at\`)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [tenantId, target, source, rawText ? rawText.slice(0, 2000) : null, fileName || null,
       JSON.stringify(cleanRows), cleanRows.length, 'DRAFT', usedFallback ? 1 : 0,

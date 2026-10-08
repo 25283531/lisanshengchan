@@ -121,8 +121,8 @@ export default function registerMaintenanceRoutes(app, db, ctx) {
 
     const code = await genCode(db, tid);
     const id = await db.run(
-      `INSERT INTO maintenance_plans (tenant_id, code, target_type, target_code, target_name, kind, fault_desc,
-        plan_start_at, plan_finish_at, duration_minutes, status, created_by, created_by_name, created_at, updated_at)
+      `INSERT INTO maintenance_plans (\`tenant_id\`, \`code\`, \`target_type\`, \`target_code\`, \`target_name\`, \`kind\`, \`fault_desc\`,
+        \`plan_start_at\`, \`plan_finish_at\`, \`duration_minutes\`, \`status\`, \`created_by\`, \`created_by_name\`, \`created_at\`, \`updated_at\`)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [tid, code, targetType, targetCode, device.name || targetCode, kind, b.faultDesc || null,
         b.planStartAt || null, b.planFinishAt || null, num(b.durationMinutes, 0),
