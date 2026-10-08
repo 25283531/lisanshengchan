@@ -1,0 +1,23 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/login/login",
+    "pages/equipment/equipment",
+    "pages/inventory/inventory",
+    "pages/production/production",
+    "pages/schedule/schedule",
+    "pages/material/material",
+    "pages/orders/orders",
+    "pages/tasks/tasks",
+    "pages/me/me"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#0d7a6f",
+    "navigationBarTitleText": "注塑生产协同",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f5f7f8",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

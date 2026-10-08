@@ -86,6 +86,21 @@ export const config = {
   serveAdminWeb: bool(process.env.SERVE_ADMIN_WEB, true),
   adminWebDir: process.env.ADMIN_WEB_DIR || resolve(ROOT, '..', 'admin-web'),
 
+  /**
+   * 微信小程序（v3.2 新增）
+   * appId/secret 填现有小程序的凭证，留空则只能用开发模式登录。
+   */
+  wechat: {
+    appId: process.env.WX_APPID || '',
+    secret: process.env.WX_SECRET || '',
+    /**
+     * 开发模式：跳过 jscode2session，允许用手机号直接换取令牌。
+     * 仅在非 production 下生效，用于本地联调与演示；上线务必置 false。
+     */
+    devMode: bool(process.env.WX_DEV_MODE, false),
+    timeoutMs: num(process.env.WX_TIMEOUT_MS, 10000),
+  },
+
   /** 排产求解器（v3.1 新增） */
   optimizer: {
     enabled: bool(process.env.OPTIMIZER_ENABLED, true),

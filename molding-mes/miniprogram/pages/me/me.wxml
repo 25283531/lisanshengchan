@@ -1,0 +1,29 @@
+<view class="wrap">
+  <view class="card">
+    <view class="card-title">{{user.name || '—'}}<text class="tag brand">{{user.role_zh}}</text></view>
+    <view class="row"><text class="k">公司</text><text class="v">{{tenant.name}}</text></view>
+    <view class="row"><text class="k">手机号</text><text class="v mono">{{user.phone}}</text></view>
+    <view class="row" wx:if="{{user.machine_code}}"><text class="k">绑定机台</text><text class="v">{{user.machine_code}}</text></view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">我的可见范围</view>
+    <view wx:for="{{views}}" wx:key="view" class="row">
+      <text class="k">{{item.icon}} {{item.zh}}</text>
+      <text class="v muted">{{item.desc}}</text>
+    </view>
+    <view class="hint" wx:if="{{overridden}}">管理员为你单独指定了可见范围（已覆盖角色默认值）。</view>
+    <view class="hint" wx:else>当前为角色默认范围，管理员可单独调整。</view>
+    <view class="empty" wx:if="{{!views.length}}">暂无可见范围，请联系管理员</view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">服务器地址</view>
+    <input class="line" placeholder="https://mes.example.com" value="{{baseUrl}}" bindinput="onBaseInput" />
+    <button class="primary" type="primary" bindtap="saveBase">保存</button>
+    <view class="hint">{{envTip}}</view>
+  </view>
+
+  <button class="ghost" bindtap="unbind">解绑微信身份</button>
+  <button class="danger" bindtap="logout">退出登录</button>
+</view>

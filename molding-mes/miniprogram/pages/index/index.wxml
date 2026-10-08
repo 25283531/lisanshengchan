@@ -1,0 +1,33 @@
+<view class="wrap">
+  <view class="card">
+    <view class="card-title">
+      <text>{{user.name || '未登录'}}</text>
+      <text class="tag brand">{{user.role_zh}}</text>
+    </view>
+    <view class="row"><text class="k">公司</text><text class="v">{{tenant.name}}</text></view>
+    <view class="row"><text class="k">手机号</text><text class="v mono">{{user.phone}}</text></view>
+    <view class="row" wx:if="{{user.machine_code}}"><text class="k">绑定机台</text><text class="v">{{user.machine_code}}</text></view>
+    <view class="hint" wx:if="{{overridden}}">你的可见范围由管理员单独指定（非角色默认）。</view>
+    <view class="hint" wx:if="{{refreshedAt}}">数据更新于 {{refreshedAt}}</view>
+  </view>
+
+  <view wx:if="{{views.length}}">
+    <view class="entry" wx:for="{{views}}" wx:key="view" data-view="{{item.view}}" bindtap="go">
+      <view class="icon">{{item.icon}}</view>
+      <view class="txt">
+        <view class="t">{{item.zh}}</view>
+        <view class="d">{{item.desc}}</view>
+      </view>
+      <view class="arrow">›</view>
+    </view>
+  </view>
+
+  <view class="card" wx:else>
+    <view class="empty">
+      <view>你目前没有任何可见范围</view>
+      <view class="hint">请联系公司管理员在后台「小程序授权」中为你勾选。</view>
+    </view>
+  </view>
+
+  <button class="ghost" bindtap="goMe">我的 / 服务器设置</button>
+</view>

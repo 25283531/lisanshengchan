@@ -1,0 +1,45 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+
+  <block wx:else>
+    <view class="grid">
+      <view class="cell"><view class="stat"><view class="k">在建订单</view><view class="v">{{summary.open_orders}}</view></view></view>
+      <view class="cell"><view class="stat ok"><view class="k">运行机台</view><view class="v">{{summary.running_machines}}<small>/{{summary.machines_total}}</small></view></view></view>
+      <view class="cell"><view class="stat {{summary.delay_risk_orders ? 'err' : ''}}"><view class="k">交期风险</view><view class="v">{{summary.delay_risk_orders}}</view></view></view>
+      <view class="cell"><view class="stat"><view class="k">今日出库</view><view class="v">{{summary.outbound_today_qty}}<small> 个</small></view></view></view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">机台实况</view>
+      <view wx:for="{{machines}}" wx:key="machine_code" style="padding:14rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.machine_code}} <text class="muted">{{item.machine_name}}</text></text>
+          <text class="tag {{item.cls}}">{{item.running ? '生产中' : item.status}}</text>
+        </view>
+        <block wx:if="{{item.running}}">
+          <view class="row"><text class="k">在产</text><text class="v">{{item.running.product_name}}　{{item.running.planned_qty}} 个</text></view>
+          <view class="row"><text class="k">时间</text><text class="v mono">{{item.run_short}}</text></view>
+          <view class="bar"><view class="in" style="width:{{item.running.progress_pct || 0}}%"></view></view>
+        </block>
+        <view class="muted" wx:else>空闲</view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">在制订单<text class="more">今日出库 {{summary.outbound_today_batches}} 批</text></view>
+      <view wx:for="{{orders}}" wx:key="order_code" style="padding:16rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.product_name}}</text>
+          <text class="tag {{item.cls}}">{{item.delay_risk ? '有逾期风险' : item.status}}</text>
+        </view>
+        <view class="muted">{{item.order_code}}　{{item.customer_name || '—'}}</view>
+        <view class="row"><text class="k">数量</text><text class="v">{{item.quantity}} 个</text></view>
+        <view class="row"><text class="k">已产 / 待产</text><text class="v">{{item.completed_qty}} / {{item.remaining_qty}}</text></view>
+        <view class="row"><text class="k">交期</text><text class="v">{{item.due_short}}</text></view>
+        <view class="row" wx:if="{{item.planned_end_at}}"><text class="k">排产完工</text><text class="v mono">{{item.end_short}}</text></view>
+        <view class="bar"><view class="in {{item.cls}}" style="width:{{item.pct}}%"></view></view>
+      </view>
+      <view class="empty" wx:if="{{!orders.length}}">当前没有在建订单</view>
+    </view>
+  </block>
+</view>

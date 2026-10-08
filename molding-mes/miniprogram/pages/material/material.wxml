@@ -1,0 +1,19 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+  <block wx:else>
+    <view class="card">
+      <view class="card-title">配料计划<text class="more">共 {{summary.items}} 项</text></view>
+      <view wx:for="{{items}}" wx:key="sku" style="padding:18rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.name}}</text>
+          <text class="tag {{item.kind === 'LABEL' ? 'brand' : 'ok'}}">{{item.kind_zh}} {{item.total_qty}} {{item.unit}}</text>
+        </view>
+        <view wx:for="{{item.details}}" wx:for-item="d" wx:key="use_at" class="row">
+          <text class="k">{{d.order_code}}　{{d.machine_code || '—'}} / {{d.mixer_code || '—'}}</text>
+          <text class="v">{{d.qty}} {{item.unit}}　<text class="mono">{{d.use_short}}</text></text>
+        </view>
+      </view>
+      <view class="empty" wx:if="{{!items.length}}">暂无配料计划</view>
+    </view>
+  </block>
+</view>

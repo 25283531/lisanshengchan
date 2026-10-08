@@ -1,0 +1,47 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+
+  <block wx:else>
+    <view class="grid">
+      <view class="cell"><view class="stat"><view class="k">排产任务</view><view class="v">{{summary.tasks}}</view></view></view>
+      <view class="cell"><view class="stat"><view class="k">占用机台</view><view class="v">{{summary.machines}}</view></view></view>
+      <view class="cell"><view class="stat"><view class="k">计划总工时</view><view class="v">{{summary.total_duration_hours}}<small> h</small></view></view></view>
+      <view class="cell"><view class="stat warn"><view class="k">换模次数</view><view class="v">{{summary.changeovers}}</view></view></view>
+      <view class="cell"><view class="stat {{summary.delay_risk ? 'err' : 'ok'}}"><view class="k">交期风险</view><view class="v">{{summary.delay_risk}}</view></view></view>
+      <view class="cell"><view class="stat"><view class="k">换模工时</view><view class="v">{{summary.changeover_minutes}}<small> 分</small></view></view></view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">计划窗口<text class="more">更新 {{summary.generated_at}}</text></view>
+      <view class="row"><text class="k">最早开工</text><text class="v mono">{{summary.first_start_at || '—'}}</text></view>
+      <view class="row"><text class="k">最晚完工</text><text class="v mono">{{summary.last_end_at || '—'}}</text></view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">机台负载</view>
+      <view wx:for="{{loads}}" wx:key="machine_code" class="row">
+        <text class="k">{{item.machine_code}}</text>
+        <text class="v">{{item.planned_hours}} h</text>
+      </view>
+      <view class="empty" wx:if="{{!loads.length}}">暂无排产</view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">排产明细</view>
+      <view wx:for="{{tasks}}" wx:key="seq" style="padding:18rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.seq}}. {{item.machine_code}}　模具 {{item.mold_code}}</text>
+          <text class="tag {{item.decision_cls}}">{{item.decision_zh}}</text>
+        </view>
+        <view class="muted">{{item.order_code}}　{{item.customer_name || '—'}}　{{item.product_name}}</view>
+        <view class="row"><text class="k">计划产量</text><text class="v">{{item.planned_qty}} 个　{{item.units_per_hour}} 件/时</text></view>
+        <view class="row"><text class="k">起止</text><text class="v mono">{{item.start_short}} → {{item.end_short}}</text></view>
+        <view class="row"><text class="k">工时</text><text class="v">{{item.hours}} h<span wx:if="{{item.changeover_minutes}}">（含换模 {{item.changeover_minutes}} 分）</span></text></view>
+        <view class="row" wx:if="{{item.supply_line_code}}"><text class="k">供料 / 混料</text><text class="v">{{item.supply_line_code}} / {{item.mixer_code || '—'}}</text></view>
+        <view class="row" wx:if="{{item.feeding_ready_at}}"><text class="k">换料指令 / 备料到位</text><text class="v mono">{{item.feed_order_short}} / {{item.feed_ready_short}}</text></view>
+        <view wx:if="{{item.delay_risk}}" class="tag err">交期 {{item.due_date}} 存在逾期风险</view>
+      </view>
+      <view class="empty" wx:if="{{!tasks.length}}">还没有排产，先在 APP 或后台触发排产</view>
+    </view>
+  </block>
+</view>

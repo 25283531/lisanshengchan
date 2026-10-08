@@ -1,0 +1,19 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+  <block wx:else>
+    <view class="card">
+      <view class="card-title">当班任务<text class="more">{{summary.hours}} 小时班次</text></view>
+      <view class="muted">班次窗口 {{summary.shift_start}} → {{summary.shift_end}}</view>
+      <view wx:for="{{items}}" wx:key="order_code" style="padding:16rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.machine_code}}　{{item.product_name || item.product_sku}}</text>
+          <text class="tag brand">{{item.planned_qty}} 个</text>
+        </view>
+        <view class="muted">{{item.order_code}}　模具 {{item.mold_code}}</view>
+        <view class="row"><text class="k">本班时段</text><text class="v mono">{{item.window}}</text></view>
+        <view class="row" wx:if="{{item.change}}"><text class="k">换模</text><text class="v">{{item.change}}</text></view>
+      </view>
+      <view class="empty" wx:if="{{!items.length}}">本班没有安排任务</view>
+    </view>
+  </block>
+</view>

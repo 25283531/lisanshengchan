@@ -110,6 +110,39 @@
 }
 ```
 
+## 微信小程序（v3.2）
+
+登录与身份：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/mp/config` | 启动配置：当前是微信模式还是开发模式、视图字典（免鉴权） |
+| POST | `/api/mp/login` | `{code}` 换 openid；已绑定直接发令牌，未绑定返回 `need_bind` |
+| POST | `/api/mp/bind` | `{code, phoneCode}` 手机号快速验证后绑定并登录 |
+| POST | `/api/mp/unbind` | 解绑当前微信身份 |
+| GET | `/api/mp/me` | 当前身份、可见视图、是否被管理员覆盖 |
+| GET | `/api/mp/view/:view` | 视图数据：`equipment` `inventory` `production` `schedule` `material` `orders` `tasks` |
+
+管理员维护白名单：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/wx-access` | 白名单列表（含每人生效视图） |
+| POST | `/api/admin/wx-access` | 按手机号开通 / 更新（`views` 留空走角色默认） |
+| PUT | `/api/admin/wx-access/:id` | 改启用状态 / 勾选视图 |
+| DELETE | `/api/admin/wx-access/:id` | 取消授权（同时置空已绑定微信身份） |
+| GET | `/api/admin/wx-roles` | 角色字典与各角色默认视图 |
+
+登录失败的业务码（HTTP 状态不一定非 200，前端按 `code` 判断）：
+
+| code | 含义 |
+|---|---|
+| `NOT_AUTHORIZED` | 手机号不是本公司员工 |
+| `WX_NOT_ALLOWED` | 是员工，但管理员没开通小程序 |
+| `WX_DISABLED` | 开通过，但被管理员关闭 |
+| `MULTI_TENANT` | 该手机号属于多家公司，需带 `tenantCode` 重登 |
+| `VIEW_FORBIDDEN` | 请求了没有权限的视图 |
+
 ## 消息类型
 
 | type | 接收角色 | 场景 |

@@ -1,0 +1,55 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+
+  <block wx:else>
+    <view class="grid">
+      <view class="cell"><view class="stat"><view class="k">成品库存</view><view class="v">{{summary.finished_total}}<small> 个</small></view></view></view>
+      <view class="cell"><view class="stat"><view class="k">在制数量</view><view class="v">{{summary.wip_total}}</view></view></view>
+      <view class="cell"><view class="stat {{summary.material_shortages ? 'err' : 'ok'}}"><view class="k">原料缺料</view><view class="v">{{summary.material_shortages}}</view></view></view>
+      <view class="cell"><view class="stat {{summary.label_shortages ? 'err' : 'ok'}}"><view class="k">标签缺料</view><view class="v">{{summary.label_shortages}}</view></view></view>
+    </view>
+
+    <view class="card" wx:if="{{alerts.length}}">
+      <view class="card-title">缺料预警</view>
+      <view wx:for="{{alerts}}" wx:key="sku" class="row">
+        <text class="k">{{item.kind === 'LABEL' ? '标签' : '原料'}} {{item.name}}</text>
+        <text class="v"><text class="tag err">缺 {{item.gap_qty}} {{item.unit}}</text></text>
+      </view>
+      <view class="hint">缺口 = 安全库存 − 现有库存，采购提前期见下方明细。</view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">产品库存<text class="more">成品 / 在制</text></view>
+      <view wx:for="{{finished}}" wx:key="sku" class="row">
+        <text class="k">{{item.name}}</text>
+        <text class="v">{{item.stock_qty}} {{item.unit}}<text class="muted" wx:if="{{item.wip_qty}}">　在制 {{item.wip_qty}}</text></text>
+      </view>
+      <view class="empty" wx:if="{{!finished.length}}">暂无产品数据</view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">原料库存</view>
+      <view wx:for="{{materials}}" wx:key="sku" style="padding:14rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between">
+          <text>{{item.name}}<text class="muted"> {{item.sku}}</text></text>
+          <text class="tag {{item.cls}}">{{item.stock_qty}} {{item.unit}}</text>
+        </view>
+        <view class="muted">安全库存 {{item.safety_stock}} {{item.unit}}　提前期 {{item.lead_time_days}} 天</view>
+        <view class="bar" wx:if="{{item.pct !== null}}"><view class="in {{item.cls === 'err' ? 'err' : ''}}" style="width:{{item.pct}}%"></view></view>
+      </view>
+      <view class="empty" wx:if="{{!materials.length}}">暂无原料数据</view>
+    </view>
+
+    <view class="card">
+      <view class="card-title">标签库存</view>
+      <view wx:for="{{labels}}" wx:key="sku" style="padding:14rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between">
+          <text>{{item.name}}</text>
+          <text class="tag {{item.cls}}">{{item.stock_qty}} {{item.unit}}</text>
+        </view>
+        <view class="muted">安全库存 {{item.safety_stock}} {{item.unit}}　补货 {{item.lead_time_days}} 天</view>
+      </view>
+      <view class="empty" wx:if="{{!labels.length}}">暂无标签数据</view>
+    </view>
+  </block>
+</view>

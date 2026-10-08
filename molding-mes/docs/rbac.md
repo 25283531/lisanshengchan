@@ -5,6 +5,8 @@
 | 角色 | 中文 | 职责 |
 |---|---|---|
 | `ADMIN` | 公司管理员 | 录入基础数据、授权员工与分配角色、配置 AI 与查看授权期限 |
+| `BOSS` | 老板 | 只读经营视角：成品库存、原料库存、当前生产状态（v3.2 新增） |
+| `PMC` | 排产计划员 | 查看与推动排产计划、交期风险与产能占用（v3.2 新增） |
 | `SALES` | 业务员 | 用自然语言下单、改单、查进度与交期 |
 | `PRODUCTION` | 生产人员 | 接收当班任务、报工与出库；可绑定机台，也可不绑定 |
 | `TECHNICIAN` | 技术员 | 维护模具与机台基础数据、接收换模与保养提醒 |
@@ -14,23 +16,53 @@
 
 ## 2. 权限矩阵
 
-| 权限 | ADMIN | SALES | PRODUCTION | TECHNICIAN | MIXER | WAREHOUSE |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|
-| `master.read` 读基础数据 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `master.write` 改基础数据 | ✅ | — | — | ✅ | — | — |
-| `stock.write` 改库存 | ✅ | — | — | — | — | ✅ |
-| `order.read` 查订单 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `order.create` 下单 | ✅ | ✅ | — | — | — | — |
-| `order.update` 改单 | ✅ | ✅ | — | — | — | — |
-| `order.outbound` 出库/报工 | ✅ | — | ✅ | — | — | ✅ |
-| `schedule.read` 看排产 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `schedule.run` 触发排产 | ✅ | — | — | ✅ | — | — |
-| `material.read` 看配料 | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| `material.write` 改配料 | ✅ | — | — | — | — | ✅ |
-| `employee.manage` 员工授权 | ✅ | — | — | — | — | — |
-| `tenant.config` 公司配置 | ✅ | — | — | — | — | — |
-| `audit.read` 审计日志 | ✅ | — | — | — | — | — |
-| `chat.use` 使用助手 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 权限 | ADMIN | BOSS | PMC | SALES | PRODUCTION | TECHNICIAN | MIXER | WAREHOUSE |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| `master.read` 读基础数据 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `master.write` 改基础数据 | ✅ | — | — | — | — | ✅ | — | — |
+| `stock.write` 改库存 | ✅ | — | — | — | — | — | — | ✅ |
+| `order.read` 查订单 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `order.create` 下单 | ✅ | — | — | ✅ | — | — | — | — |
+| `order.update` 改单 | ✅ | — | — | ✅ | — | — | — | — |
+| `order.outbound` 出库/报工 | ✅ | — | — | — | ✅ | — | — | ✅ |
+| `schedule.read` 看排产 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `schedule.run` 触发排产 | ✅ | — | ✅ | — | — | ✅ | — | — |
+| `material.read` 看配料 | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ |
+| `material.write` 改配料 | ✅ | — | — | — | — | — | — | ✅ |
+| `employee.manage` 员工授权 | ✅ | — | — | — | — | — | — | — |
+| `wx.manage` 小程序访问白名单 | ✅ | — | — | — | — | — | — | — |
+| `tenant.config` 公司配置 | ✅ | — | — | — | — | — | — | — |
+| `audit.read` 审计日志 | ✅ | — | — | — | — | — | — | — |
+| `chat.use` 使用助手 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+## 2.1 小程序可见视图（v3.2）
+
+小程序只读，权限精确到「视图」。管理员在后台按手机号开通时可逐人勾选覆盖角色默认值：
+
+| 视图 | 内容 | 典型角色 |
+|---|---|---|
+| `equipment` 设备与模具 | 机台状态、待维护模具、保养进度、下次换模时间与模具编号 | 技术员 |
+| `inventory` 库存总览 | 成品 / 原料 / 标签库存与安全库存预警 | 老板、仓库 |
+| `production` 生产实况 | 在制订单进度、机台实况、今日出库、交期风险 | 老板、生产 |
+| `schedule` 排产计划 | 任务时间轴、机台负载、换模与配料时点 | PMC |
+| `material` 配料计划 | 原料用量、使用时间、混料机分配 | 配料员、仓库 |
+| `orders` 订单 | 订单列表、交期与待生产数量 | 业务员 |
+| `tasks` 当班任务 | 本班要生产的产品规格与数量 | 生产人员 |
+
+角色默认视图（`rbac.js#ROLE_VIEWS`）：
+
+| 角色 | 默认视图 |
+|---|---|
+| ADMIN | 全部 |
+| BOSS | `inventory` `production` |
+| PMC | `schedule` |
+| SALES | `orders` |
+| PRODUCTION | `tasks` `production` |
+| TECHNICIAN | `equipment` |
+| MIXER | `material` |
+| WAREHOUSE | `inventory` `material` |
+
+解析规则：勾选非空 → 以勾选为准；未勾选或空数组 → 走角色默认。
 
 ## 3. 机台绑定与消息可见性
 

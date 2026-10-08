@@ -1,0 +1,4 @@
+{
+  "desc": "只读看板，不对外索引",
+  "rules": [{ "action": "disallow", "page": "*" }]
+}

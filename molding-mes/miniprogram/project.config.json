@@ -1,0 +1,21 @@
+{
+  "description": "注塑生产协同 MES 微信小程序（只读看板）",
+  "miniprogramRoot": "./",
+  "appid": "touristappid",
+  "projectname": "molding-mes-miniprogram",
+  "compileType": "miniprogram",
+  "libVersion": "3.5.0",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "babelSetting": { "ignore": [], "disablePlugins": [], "outputPath": "" }
+  },
+  "condition": {
+    "miniprogram": { "list": [] }
+  }
+}

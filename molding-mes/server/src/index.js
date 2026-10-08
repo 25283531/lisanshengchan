@@ -20,6 +20,7 @@ import registerOrderRoutes from './modules/orders.js';
 import registerScheduleRoutes from './modules/schedule.js';
 import registerNotifyRoutes from './modules/notify.js';
 import registerChatRoutes from './modules/chat.js';
+import registerMpRoutes from './modules/mp.js';
 
 export async function buildServer(opts = {}) {
   const db = opts.db || (await createDb(opts.dbConfig ? { db: opts.dbConfig } : undefined));
@@ -57,6 +58,7 @@ export async function buildServer(opts = {}) {
   registerScheduleRoutes(app, db, ctx);
   registerNotifyRoutes(app, db, ctx);
   registerChatRoutes(app, db, ctx);
+  registerMpRoutes(app, db, ctx);
 
   app.setNotFoundHandler(async (req, reply) => {
     if (req.url.startsWith('/api')) return reply.code(404).send(fail('接口不存在', 'NOT_FOUND', 404));

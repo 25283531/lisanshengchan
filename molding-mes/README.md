@@ -4,7 +4,8 @@
 
 - **服务端**：Node.js 22 + Fastify，数据库支持 SQLite（零依赖，本地即跑）与 MySQL 8（生产）
 - **管理后台**：原生 HTML/JS，由服务端静态托管（`/admin/`）
-- **安卓端**：Kotlin + Jetpack Compose（源码工程，用 Android Studio 编译）
+- **安卓端**：Kotlin + Jetpack Compose（源码工程，用 Android Studio 编译）——读写：下单、报工、出库
+- **微信小程序**：原生小程序（源码工程，微信开发者工具打开）——只读看板，按手机号判定可见范围
 - **AI 解析**：后台可配置 BaseURL / APIKey / 模型（OpenAI 兼容协议）；未配置 Key 时自动走内置确定性解析器，不联网也能下单出库
 
 ---
@@ -67,6 +68,16 @@ npm run demo
 
 生产人员说「河北麻辣面筋出库5000个」→ 自动匹配订单 → 待生产数量 20000 → 15000 → 通知仓库与业务员。
 
+微信小程序（只读看板）从同一份数据里按手机号取各自该看的部分：
+
+```
+技术员 → 机台状态 / 待维护模具 / 保养进度 / 下次换模时间与模具编号
+老板   → 成品库存 / 原料库存 / 当前生产状态
+PMC    → 排产计划（任务时间轴、机台负载、换模与配料时点）
+```
+
+谁能看什么由公司管理员在后台「小程序授权」里按手机号开通，并可逐人勾选覆盖角色默认值。详见 [`miniprogram/README.md`](miniprogram/README.md)。
+
 ---
 
 ## 三、目录结构
@@ -79,14 +90,17 @@ molding-mes/
 │   │   ├── config.js           配置（.env）
 │   │   ├── middleware.js       鉴权 / 租户授权校验 / 消息可见性
 │   │   ├── db/                 双方言数据层（schema.js 单一事实源 → 生成 DDL）
-│   │   ├── lib/                util / auth(JWT) / rbac / repo / http
-│   │   ├── domain/             排产引擎、物料核算、AI 解析、消息生成
-│   │   └── modules/            auth / platform / admin / master / orders / schedule / notify / chat
+│   │   ├── lib/                util / auth(JWT) / rbac / repo / http / wechat
+│   │   ├── domain/             排产引擎、物料核算、小程序视图聚合、AI 解析、消息生成
+│   │   └── modules/            auth / platform / admin / master / orders / schedule / notify / chat / mp
 │   ├── scripts/seed.js         演示种子数据
-│   ├── scripts/demo-flow.js    端到端演示
+│   ├── scripts/demo-flow.js    端到端演示（下单→排产→通知→出库）
+│   ├── scripts/mp-demo.js      小程序权限与视图端到端验证
 │   └── data/mes.db             SQLite 数据文件（自动创建）
 ├── admin-web/                  管理后台（原生 HTML/CSS/JS，无构建）
 ├── android/                    安卓工程（Kotlin + Compose）
+├── miniprogram/                微信小程序（原生，只读看板）
+├── optimizer/                  CP-SAT 排产求解器（FastAPI + OR-Tools）
 ├── docker-compose.yml          生产用 MySQL
 └── docs/                       架构、接口、权限文档
 ```

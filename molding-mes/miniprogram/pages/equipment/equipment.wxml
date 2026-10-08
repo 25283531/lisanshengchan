@@ -1,0 +1,70 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+
+  <block wx:else>
+    <!-- 概览 -->
+    <view class="grid">
+      <view class="cell"><view class="stat"><view class="k">机台</view><view class="v">{{summary.machines_total}}</view></view></view>
+      <view class="cell"><view class="stat ok"><view class="k">运行中</view><view class="v">{{summary.machines_running}}</view></view></view>
+      <view class="cell"><view class="stat {{summary.machines_abnormal ? 'err' : ''}}"><view class="k">异常</view><view class="v">{{summary.machines_abnormal}}</view></view></view>
+      <view class="cell"><view class="stat {{summary.molds_due ? 'err' : ''}}"><view class="k">待保养</view><view class="v">{{summary.molds_due}}</view></view></view>
+      <view class="cell"><view class="stat warn"><view class="k">临期模具</view><view class="v">{{summary.molds_near_due}}</view></view></view>
+      <view class="cell"><view class="stat"><view class="k">待换模</view><view class="v">{{summary.pending_mold_changes}}</view></view></view>
+    </view>
+
+    <!-- 机台状态 -->
+    <view class="card">
+      <view class="card-title">机台状态<text class="more">更新 {{generatedAt}}</text></view>
+      <view wx:for="{{machines}}" wx:key="machine_code" style="padding:16rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.machine_code}} <text class="muted">{{item.machine_name}}</text></text>
+          <text class="tag {{item.status_cls}}">{{item.status_text}}</text>
+        </view>
+        <view class="row"><text class="k">机上模具编号</text><text class="v mono">{{item.current_mold_code || '—'}}</text></view>
+        <view class="row"><text class="k">供料 / 混料</text><text class="v">{{item.feeding_mode}} {{item.supply_line_code || '—'}} / {{item.mixer_code || '—'}}</text></view>
+        <block wx:if="{{item.running}}">
+          <view class="row"><text class="k">在产订单</text><text class="v">{{item.running.order_code}} {{item.running.product_name}}</text></view>
+          <view class="row"><text class="k">计划 / 时间</text><text class="v">{{item.running.planned_qty}} 个　{{item.run_short}}</text></view>
+          <view class="bar"><view class="in" style="width:{{item.running.progress_pct || 0}}%"></view></view>
+        </block>
+        <view class="muted" wx:else>当前空闲</view>
+        <block wx:if="{{item.next_mold_change}}">
+          <view class="row"><text class="k">下次换模</text><text class="v">{{item.next_mold_change.to_mold_code}}（{{item.next_mold_change.changeover_minutes}} 分钟）</text></view>
+          <view class="row"><text class="k">换模开始</text><text class="v mono">{{item.change_short}}</text></view>
+        </block>
+      </view>
+      <view class="empty" wx:if="{{!machines.length}}">暂无机台数据</view>
+    </view>
+
+    <!-- 待维护 -->
+    <view class="card">
+      <view class="card-title">待维护 / 保养期<text class="more">共 {{molds.length}} 套模具</text></view>
+      <view wx:for="{{pending}}" wx:key="mold_code" style="padding:16rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between">
+          <text style="font-weight:600">{{item.mold_code}} <text class="muted">{{item.mold_name}}</text></text>
+          <text class="tag {{item.maintenance_due ? 'err' : 'warn'}}">{{item.maintenance_due ? '需保养' : '临期'}}</text>
+        </view>
+        <view class="row"><text class="k">累计 / 阈值模次</text><text class="v mono">{{item.cumulative_shots}} / {{item.maintenance_at_shots}}</text></view>
+        <view class="row"><text class="k">剩余模次</text><text class="v mono">{{item.remaining_shots}}</text></view>
+        <view class="row"><text class="k">穴数 / 上次保养</text><text class="v">{{item.cavities}} 穴　{{item.last_short}}</text></view>
+        <view class="bar"><view class="in {{item.pct_cls}}" style="width:{{item.pct}}%"></view></view>
+        <view class="muted" wx:if="{{item.eta_days}}">按最近排产效率约 {{item.eta_days}} 天到阈值（{{item.eta_basis}}）</view>
+        <view class="muted" wx:else>暂无排产效率依据，不预估到期日（避免凭经验拍数）</view>
+      </view>
+      <view class="empty" wx:if="{{!pending.length}}">所有模具均在保养周期内</view>
+    </view>
+
+    <!-- 下次换模 -->
+    <view class="card">
+      <view class="card-title">下次更换模具时间</view>
+      <view wx:for="{{changes}}" wx:key="machine_code" style="padding:14rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="font-weight:600">{{item.machine_code}}　{{item.from_mold_code || '空'}} → {{item.to_mold_code}}</view>
+        <view class="row"><text class="k">换模窗口</text><text class="v mono">{{item.start_short}} — {{item.end_short}}</text></view>
+        <view class="row"><text class="k">换模时长</text><text class="v">{{item.changeover_minutes}} 分钟</text></view>
+        <view class="row"><text class="k">开工</text><text class="v mono">{{item.work_short}}　{{item.order_code}} {{item.product_name}}</text></view>
+        <view class="hint">{{item.derive_note}}</view>
+      </view>
+      <view class="empty" wx:if="{{!changes.length}}">近期没有换模计划</view>
+    </view>
+  </block>
+</view>

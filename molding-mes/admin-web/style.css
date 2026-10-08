@@ -78,6 +78,15 @@ pre.json{background:#f7f9fa;border:1px solid var(--line);border-radius:8px;paddi
 .toast{position:fixed;right:20px;bottom:20px;background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;z-index:99;font-size:13px}
 .toast.err{background:var(--err)}
 .toast.ok{background:var(--ok)}
+/* 视图勾选（小程序授权） */
+.checks{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));margin:12px 0}
+.checks .chk{display:flex;gap:8px;align-items:flex-start;background:#fafbfc;border:1px solid var(--line);
+  border-radius:8px;padding:10px 12px;margin:0;cursor:pointer}
+.checks .chk input{margin-top:3px}
+.checks .chk span{font-size:13px;color:var(--ink);font-weight:600}
+.checks .chk small{display:block;color:var(--ink2);font-size:12px;line-height:1.4;margin-top:2px}
+code{background:#f1f4f5;padding:1px 5px;border-radius:4px;font-size:12px}
+
 .stage{border-left:3px solid var(--brand);padding-left:12px;margin-bottom:14px}
 .stage h3{margin:0 0 6px;color:var(--ink)}
 ul.check{list-style:none;margin:0;padding:0}

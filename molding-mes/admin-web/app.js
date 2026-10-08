@@ -60,6 +60,7 @@ $('#btn-logout').addEventListener('click', () => { state.token = null; $('#app')
 const NAV = [
   { id: 'overview', name: '概览' },
   { id: 'employees', name: '员工授权' },
+  { id: 'wx', name: '小程序授权' },
   { id: 'master', name: '基础数据' },
   { id: 'ai', name: 'AI 接口' },
   { id: 'schedule', name: '排产' },
@@ -73,7 +74,7 @@ function boot() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#who-name').textContent = `${state.user.name}（${state.user.role}）`;
-  const navs = state.platform ? NAV_PF : NAV.filter((n) => state.user.role === 'ADMIN' || !['employees', 'ai'].includes(n.id));
+  const navs = state.platform ? NAV_PF : NAV.filter((n) => state.user.role === 'ADMIN' || !['employees', 'wx', 'ai'].includes(n.id));
   $('#nav').innerHTML = navs.map((n) => `<button data-v="${n.id}">${n.name}</button>`).join('');
   $$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.v)));
   go(navs[0].id);
@@ -87,10 +88,11 @@ async function render() {
   const m = $('#main');
   m.innerHTML = '<section><h2>加载中…</h2></section>';
   try {
-    const fn = { overview, employees, master, ai, schedule, orders, chat, notifications, tenants, stats }[state.view];
+    const fn = { overview, employees, wx: wxAccess, master, ai, schedule, orders, chat, notifications, tenants, stats }[state.view];
     m.innerHTML = await fn();
     if (state.view === 'master') bindMaster();
     if (state.view === 'employees') bindEmployees();
+    if (state.view === 'wx') bindWx();
     if (state.view === 'ai') bindAi();
     if (state.view === 'schedule') bindSchedule();
     if (state.view === 'orders') bindOrders();
@@ -187,6 +189,121 @@ function bindEmployees() {
   });
   $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     try { await api('DELETE', `/api/admin/employees/${b.dataset.del}`); toast('已停用', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  }));
+}
+
+/* --------------------------- 小程序授权 --------------------------- */
+async function wxAccess() {
+  const [d, roles, emps] = await Promise.all([
+    api('GET', '/api/admin/wx-access'), api('GET', '/api/admin/wx-roles'), api('GET', '/api/admin/employees'),
+  ]);
+  state._wx = d;
+  state._wxRoles = roles;
+  state._emps = emps;
+  const mode = d.mode || {};
+  const modeTag = mode.mode === 'wechat' ? 'ok' : (mode.mode === 'dev' ? 'warn' : 'err');
+
+  const edit = state._wxEdit ? d.items.find((i) => i.id === state._wxEdit) : null;
+  const roleHint = (edit && edit.role)
+    ? (roles.find((r) => r.role === edit.role) || {}).default_view_names || []
+    : [];
+
+  const viewChecks = (selected, idPrefix) => d.views.map((v) => `
+    <label class="chk"><input type="checkbox" class="${idPrefix}" value="${v.view}" ${selected.includes(v.view) ? 'checked' : ''}>
+      <span>${v.icon || ''} ${esc(v.zh)}</span><small>${esc(v.desc)}</small></label>`).join('');
+
+  return `
+  <section>
+    <header><h2>小程序授权</h2><span class="spacer"></span>
+      <span class="tag ${modeTag}">${mode.mode === 'wechat' ? '已接入微信小程序' : (mode.mode === 'dev' ? '开发模式' : '未接入')}</span></header>
+    <p class="muted">${esc(mode.note || '')}
+      ${mode.appid ? `　AppID：<code>${esc(mode.appid)}</code>` : ''}</p>
+    <p class="hint">开通规则：手机号必须先是本公司员工（在「员工授权」里录入并有角色），再在这里开通小程序。
+      不勾选视图则按角色默认视图；勾选后以勾选为准。</p>
+  </section>
+
+  <section>
+    <header><h2>${edit ? `调整 ${esc(edit.phone)} 的可见范围` : '按手机号开通'}</h2></header>
+    ${edit ? '' : `
+    <div class="row">
+      <label>手机号<input id="w-phone" placeholder="13800000005"></label>
+      <label>姓名<input id="w-name" placeholder="可留空，默认取员工姓名"></label>
+      <label>备注<input id="w-remark" placeholder="例如：夜班技术员"></label>
+    </div>`}
+    <div class="checks">
+      ${viewChecks(edit ? edit.views : [], edit ? 'w-edit-view' : 'w-view')}
+    </div>
+    ${edit ? `<p class="hint">该员工角色：<b>${esc(edit.role_zh || '—')}</b>，角色默认可见：${esc(roleHint.join('、') || '—')}。勾选后覆盖默认值，全部不勾则回到角色默认。</p>` : ''}
+    <div class="row">
+      <button id="w-save" class="primary" style="width:auto">${edit ? '保存' : '开通'}</button>
+      ${edit ? '<button id="w-cancel">取消</button>' : ''}
+      <span class="muted">勾选范围决定该员工在小程序里能看到哪些数据</span>
+    </div>
+  </section>
+
+  <section>
+    <header><h2>已开通名单</h2><span class="spacer"></span><span class="muted">共 ${d.items.length} 人</span></header>
+    <table><thead><tr><th>手机号</th><th>姓名</th><th>角色</th><th>可见范围</th><th>状态</th><th></th></tr></thead>
+    <tbody>${d.items.map((i) => `<tr data-id="${i.id}">
+      <td>${esc(i.phone)}</td>
+      <td>${esc(i.name || '—')}</td>
+      <td>${i.not_employee ? '<span class="tag err">非员工</span>' : esc(i.role_zh || '—')}</td>
+      <td>${(i.effective_views || []).map((v) => `<span class="tag">${esc((d.views.find((x) => x.view === v) || {}).zh || v)}</span>`).join(' ') || '<span class="muted">—</span>'}
+        ${i.views.length ? '<span class="muted">（自定义）</span>' : '<span class="muted">（角色默认）</span>'}</td>
+      <td><span class="tag ${i.enabled ? 'ok' : 'err'}">${i.enabled ? '已开通' : '已关闭'}</span></td>
+      <td>
+        <button data-wxedit="${i.id}">范围</button>
+        <button data-wxtoggle="${i.id}">${i.enabled ? '关闭' : '开启'}</button>
+        <button class="danger" data-wxdel="${i.id}">取消</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">还没有开通任何人。先到「员工授权」录入手机号，再回来开通。</td></tr>'}</tbody></table>
+  </section>
+
+  <section>
+    <header><h2>各角色默认可见范围</h2></header>
+    <table><thead><tr><th>角色</th><th>默认视图</th><th>说明</th></tr></thead>
+    <tbody>${roles.map((r) => `<tr><td>${esc(r.zh)}</td>
+      <td>${r.default_view_names.map((n) => `<span class="tag">${esc(n)}</span>`).join(' ') || '<span class="muted">—</span>'}</td>
+      <td class="muted">${esc(r.desc)}</td></tr>`).join('')}</tbody></table>
+  </section>`;
+}
+
+function bindWx() {
+  const picks = (cls) => $$('.' + cls).filter((x) => x.checked).map((x) => x.value);
+  $('#w-save').addEventListener('click', async () => {
+    try {
+      if (state._wxEdit) {
+        const views = picks('w-edit-view');
+        await api('PUT', `/api/admin/wx-access/${state._wxEdit}`, { views });
+        toast('可见范围已更新', 'ok');
+        state._wxEdit = null;
+      } else {
+        const phone = $('#w-phone').value.trim();
+        if (!phone) return toast('请填写手机号', 'err');
+        await api('POST', '/api/admin/wx-access', {
+          phone, name: $('#w-name').value.trim() || undefined,
+          remark: $('#w-remark').value.trim() || undefined,
+          views: picks('w-view'),
+        });
+        toast('已开通小程序访问权限', 'ok');
+      }
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  const cancel = $('#w-cancel');
+  if (cancel) cancel.addEventListener('click', () => { state._wxEdit = null; render(); });
+
+  $$('[data-wxedit]').forEach((b) => b.addEventListener('click', () => {
+    state._wxEdit = Number(b.dataset.wxedit); render();
+  }));
+  $$('[data-wxtoggle]').forEach((b) => b.addEventListener('click', async () => {
+    const it = (state._wx.items || []).find((x) => x.id === Number(b.dataset.wxtoggle));
+    try { await api('PUT', `/api/admin/wx-access/${b.dataset.wxtoggle}`, { enabled: !it.enabled }); toast('已更新', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  }));
+  $$('[data-wxdel]').forEach((b) => b.addEventListener('click', async () => {
+    try { await api('DELETE', `/api/admin/wx-access/${b.dataset.wxdel}`); toast('已取消授权', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   }));
 }

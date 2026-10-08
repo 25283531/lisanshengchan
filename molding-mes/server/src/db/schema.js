@@ -70,6 +70,48 @@ export const TABLES = [
   },
 
   {
+    name: 'wx_users',
+    comment: '微信小程序身份绑定（openid ↔ 员工账号）',
+    cols: [
+      ['id', 'PK'],
+      ['appid', 'STR', 64],
+      ['openid', 'STR', 64],
+      ['unionid', 'STR', 64, null, true],
+      ['tenant_id', 'INT', null, null, true],
+      ['user_id', 'INT', null, null, true],
+      ['phone', 'STR', 32, null, true],
+      ['nickname', 'STR', 64, null, true],
+      ['avatar_url', 'STR', 255, null, true],
+      /** PENDING 已拿 openid 未绑手机号 / ACTIVE 已绑定可用 / DISABLED 已停用 */
+      ['status', 'STR', 20, 'PENDING'],
+      ['bound_at', 'DT', null, null, true],
+      ['last_login_at', 'DT', null, null, true],
+      ['created_at', 'DT'],
+      ['updated_at', 'DT'],
+    ],
+    uniques: [['appid', 'openid']],
+    indexes: [['tenant_id', 'user_id'], ['phone']],
+  },
+
+  {
+    name: 'wx_access',
+    comment: '小程序访问白名单（公司管理员按手机号开通，决定谁能用小程序）',
+    cols: [
+      ['id', 'PK'],
+      ['tenant_id', 'INT'],
+      ['phone', 'STR', 32],
+      ['name', 'STR', 64, null, true],
+      ['enabled', 'BOOL', null, 1],
+      /** 视图覆盖：留空 = 按该员工的角色默认视图；填写 = 以勾选为准 */
+      ['views', 'JSON', null, null, true],
+      ['remark', 'STR', 255, null, true],
+      ['created_at', 'DT'],
+      ['updated_at', 'DT'],
+    ],
+    uniques: [['tenant_id', 'phone']],
+  },
+
+  {
     name: 'customers',
     comment: '客户',
     cols: [

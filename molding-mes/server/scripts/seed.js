@@ -93,6 +93,16 @@ export const EMPLOYEES = [
   { phone: '13800000005', name: '赵技术', role: 'TECHNICIAN' },
   { phone: '13800000006', name: '陈配料', role: 'MIXER' },
   { phone: '13800000007', name: '刘仓库', role: 'WAREHOUSE' },
+  { phone: '13800000008', name: '孙老板', role: 'BOSS' },
+  { phone: '13800000009', name: '周计划', role: 'PMC' },
+];
+
+/** 演示用的小程序白名单：views 留空 = 走角色默认视图 */
+export const WX_ACCESS = [
+  { phone: '13800000001', name: '厂管理员', views: null, remark: '全部视图' },
+  { phone: '13800000005', name: '赵技术', views: null, remark: '技术员：设备与模具' },
+  { phone: '13800000008', name: '孙老板', views: null, remark: '老板：库存与生产实况' },
+  { phone: '13800000009', name: '周计划', views: null, remark: 'PMC：排产计划' },
 ];
 
 export const ADMIN = { phone: '13800000001', name: '厂管理员', password: '123456' };
@@ -140,6 +150,21 @@ export async function ensureEmployees(app, db, tenantId) {
   return token;
 }
 
+/** 开通小程序访问白名单（幂等） */
+export async function ensureWxAccess(app, tenantId, token) {
+  const H = { authorization: `Bearer ${token}` };
+  const out = [];
+  for (const w of WX_ACCESS) {
+    const r = await app.inject({
+      method: 'POST', url: '/api/admin/wx-access', headers: H,
+      payload: { phone: w.phone, name: w.name, remark: w.remark, views: w.views },
+    });
+    const body = JSON.parse(r.body);
+    out.push({ phone: w.phone, ok: body.code === 0, views: body.data?.effective_views || [], message: body.message });
+  }
+  return out;
+}
+
 async function main() {
   const reset = process.argv.includes('--reset');
   const db = await createDb();
@@ -154,6 +179,7 @@ async function main() {
   const { tenant } = await ensureTenant(app, db, platformToken);
   const adminToken = await ensureEmployees(app, db, tenant.id);
   const seeded = await seedMaster(app, adminToken);
+  const wx = await ensureWxAccess(app, tenant.id, adminToken);
 
   console.log('\n✅ 演示数据已就绪\n');
   console.log(`公司：${tenant.name}（${tenant.code}）`);
@@ -163,6 +189,10 @@ async function main() {
   console.log('\n账号（密码统一 123456）：');
   console.log(`  ${ADMIN.phone}  ${ADMIN.name}  公司管理员`);
   for (const e of EMPLOYEES) console.log(`  ${e.phone}  ${e.name}  ${e.role}${e.machineCode ? `（绑定机台 ${e.machineCode}）` : '（未绑定机台）'}`);
+  console.log('\n已开通小程序（密码 123456，开发模式可用手机号直登）：');
+  for (const w of wx) {
+    console.log(`  ${w.phone}  ${w.ok ? '✅' : '❌'} ${(w.views || []).join(' / ') || w.message}`);
+  }
   console.log(`\n平台口令：${config.platformToken}`);
   console.log(`数据库：${db.dialect} ${db.dialect === 'sqlite' ? config.db.file : config.db.database}\n`);
 

@@ -11,8 +11,8 @@ android {
         applicationId = "com.molding.mes"
         minSdk = 26          // Android 8.0+，覆盖绝大多数工业平板与手机
         targetSdk = 34
-        versionCode = 4
-        versionName = "3.1.0"
+        versionCode = 5
+        versionName = "3.2.0"
 
         // 服务端地址：默认走模拟器访问宿主机；正式打包请在 buildConfigField 或后台下发
         buildConfigField("String", "DEFAULT_BASE_URL", "\"http://10.0.2.2:8080/\"")

@@ -196,6 +196,8 @@ function listSchedule(ctx) {
   } = ctx;
 
   const bufferMin = num(options.bufferMinutes, 30);
+  const feedOrderLead = num(options.feedingOrderLeadMinutes, 60);
+  const feedReadyLead = num(options.feedingReadyLeadMinutes, 30);
   const startFrom = toDate(options.startFrom) || new Date();
   const startMs = startFrom.getTime();
 

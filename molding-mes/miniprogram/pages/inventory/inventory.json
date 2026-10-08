@@ -1,0 +1,5 @@
+{
+  "navigationBarTitleText": "库存总览",
+  "enablePullDownRefresh": true,
+  "usingComponents": {}
+}

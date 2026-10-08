@@ -1,0 +1,19 @@
+<view class="wrap">
+  <view class="card" wx:if="{{loading}}"><view class="empty">加载中…</view></view>
+  <block wx:else>
+    <view class="card">
+      <view class="card-title">订单<text class="more">在建 {{summary.open}} / 共 {{summary.total}}</text></view>
+      <view wx:for="{{orders}}" wx:key="code" style="padding:16rpx 0;border-bottom:1rpx solid #eef2f3">
+        <view style="display:flex;justify-content:space-between;align-items:center">
+          <text style="font-weight:600">{{item.product_name}}</text>
+          <text class="tag {{item.status_cls}}">{{item.status_zh}}</text>
+        </view>
+        <view class="muted">{{item.code}}　{{item.customer_name || '—'}}</view>
+        <view class="row"><text class="k">数量 / 待产</text><text class="v">{{item.quantity}} / {{item.remaining_qty}}</text></view>
+        <view class="row"><text class="k">交期</text><text class="v">{{item.due_date || '—'}}</text></view>
+        <view class="bar"><view class="in" style="width:{{item.pct}}%"></view></view>
+      </view>
+      <view class="empty" wx:if="{{!orders.length}}">暂无订单</view>
+    </view>
+  </block>
+</view>
