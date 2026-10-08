@@ -4,10 +4,16 @@
 # .github/workflows，因此本文件放在仓库根，构建上下文指向 ./molding-mes/android。
 #
 # 签名（可选）：在仓库 Settings → Secrets 里配置
-#   ANDROID_KEYSTORE_BASE64      —— base64(keystore.jks)
-#   ANDROID_KEYSTORE_PASSWORD    —— keystore 口令
+#   ANDROID_KEYSTORE_BASE64      —— base64(密钥库文件)，PKCS12 / JKS 均支持
+#   ANDROID_KEYSTORE_PASSWORD    —— 密钥库口令
 #   ANDROID_KEY_ALIAS            —— 别名
 #   ANDROID_KEY_PASSWORD         —— 别名口令
+#
+# 密钥库生成（JDK 9+ 默认就是 PKCS12，一条命令即可）：
+#   keytool -genkeypair -v -keystore mes-release.p12 -storetype PKCS12 \
+#     -alias molding-mes -keyalg RSA -keysize 2048 -validity 9125 \
+#     -dname "CN=Molding MES Release,OU=Production IT,O=MoldingMES,C=CN"
+#   base64 -w0 mes-release.p12 > ks.b64     # 内容粘到 ANDROID_KEYSTORE_BASE64
 # 未配置时只产出未签名 release APK（可直接用于内部分发/自测）。
 
 name: MES Android APK
@@ -94,9 +100,16 @@ jobs:
           echo "$KS_B64" | base64 -d > /tmp/mes.jks
           for apk in app/build/outputs/apk/release/*.apk; do
             "$ZIPALIGN" -f 4 "$apk" /tmp/aligned.apk
-            "$APKSIGNER" sign --ks /tmp/mes.jks --ks-key-alias "$KS_ALIAS" \
+            # JDK 9+ 的 keytool 默认产出 PKCS12，老版本产出 JKS —— 两种都试
+            if ! "$APKSIGNER" sign --ks-type PKCS12 --ks /tmp/mes.jks --ks-key-alias "$KS_ALIAS" \
               --ks-pass "pass:$KS_PASS" --key-pass "pass:$KEY_PASS" \
-              --out /tmp/signed.apk /tmp/aligned.apk
+              --out /tmp/signed.apk /tmp/aligned.apk; then
+              echo "PKCS12 签名失败，回退为自动识别格式"
+              "$APKSIGNER" sign --ks /tmp/mes.jks --ks-key-alias "$KS_ALIAS" \
+                --ks-pass "pass:$KS_PASS" --key-pass "pass:$KEY_PASS" \
+                --out /tmp/signed.apk /tmp/aligned.apk
+            fi
+            "$APKSIGNER" verify --print-certs /tmp/signed.apk | head -4
             mv /tmp/signed.apk "$apk"
           done
           rm -f /tmp/mes.jks /tmp/aligned.apk

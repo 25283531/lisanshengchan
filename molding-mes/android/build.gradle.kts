@@ -2,6 +2,9 @@
 plugins {
     id("com.android.application") version "8.6.1" apply false
     id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    // Kotlin 2.0 起 Compose 编译器拆成独立插件，不再由 kotlin-android 内置，
+    // 不加这一行会直接报 "Starting in Kotlin 2.0, the Compose Compiler Gradle plugin is required"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
     id("com.google.devtools.ksp") version "2.0.21-1.0.25" apply false
 }
 
