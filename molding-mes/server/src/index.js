@@ -40,10 +40,26 @@ export async function buildServer(opts = {}) {
 
   registerAuth(app, db);
 
-  if (config.serveAdminWeb && existsSync(config.adminWebDir)) {
+  const adminWebOn = config.serveAdminWeb && existsSync(config.adminWebDir);
+
+  if (adminWebOn) {
     await app.register(fastifyStatic, { root: config.adminWebDir, prefix: '/admin/', decorateReply: false });
     app.get('/admin', async (req, reply) => reply.redirect('/admin/'));
   }
+
+  /**
+   * 根路径。浏览器直接访问 http://host:8080/ 时跳到管理后台，
+   * 否则给一份入口清单——避免用户打开根地址看到 404 以为服务没起来。
+   */
+  app.get('/', async (req, reply) => {
+    if (adminWebOn) return reply.redirect('/admin/', 302);
+    return reply.type('application/json').send(ok({
+      service: 'molding-mes-server',
+      version: config.version,
+      endpoints: { health: '/api/health', admin: '/admin/' },
+      note: '当前未开启管理后台静态托管（SERVE_ADMIN_WEB=false）',
+    }));
+  });
 
   app.get('/api/health', async () => ok({
     status: 'ok', dialect: db.dialect, env: config.env,

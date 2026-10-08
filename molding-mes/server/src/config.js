@@ -30,8 +30,18 @@ loadDotEnv();
 const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes|on)$/i.test(v));
 
+/** 从 package.json 取版本号，避免两处维护 */
+function readVersion() {
+  try {
+    return JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')).version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
 export const config = {
   env: process.env.NODE_ENV || 'development',
+  version: readVersion(),
   port: num(process.env.PORT, 8080),
   host: process.env.HOST || '0.0.0.0',
 
