@@ -215,6 +215,10 @@ data class ChatResult(
     val message: String? = null,
     val confidence: Double = 0.0,
     val used_fallback: Boolean = false,
+    /** 走了本地降级解析（AI 不可用或调用失败） */
+    val degraded: Boolean = false,
+    /** AI 不可用且本地接不住：message 固定为提示文案 */
+    val ai_unavailable: Boolean = false,
     val needs_confirm: Boolean = false,
     val candidates: List<JsonObject> = emptyList(),
     val data: JsonObject? = null,
