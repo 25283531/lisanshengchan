@@ -6,14 +6,15 @@
 
 | 版本 | 代码位置 | 形态 | 说明 |
 | --- | --- | --- | --- |
-| v3.2（当前） | `molding-mes/` | 同上 + 微信小程序 | 新增原生微信小程序只读看板：按手机号判定权限，新增老板（BOSS）与排产计划员（PMC）角色，管理员可逐人勾选可见范围。详见 [`molding-mes/miniprogram/README.md`](molding-mes/miniprogram/README.md) |
+| v3.3（当前） | `molding-mes/` | 同上 + 真实微信小程序接入 | 已绑定 AppID `wx8be948bf11ef3fca`。因该小程序为**个人主体**（无法使用付费的 `getPhoneNumber` 手机号组件），改为「管理员签发一次性绑定码」完成身份绑定；同时提供手机号组件可用性自检。详见 [`molding-mes/miniprogram/README.md`](molding-mes/miniprogram/README.md) |
+| v3.2 | `molding-mes/` | 同上 + 微信小程序 | 新增原生微信小程序只读看板：按手机号判定权限，新增老板（BOSS）与排产计划员（PMC）角色，管理员可逐人勾选可见范围 |
 | v3.1 | `molding-mes/` | 同上 + Python CP-SAT 求解器 | 排产升级为 OR-Tools CP-SAT 全局最优化；求解器不可用时自动降级到内置列表调度。详见 [`molding-mes/README.md`](molding-mes/README.md) |
 | v3.0 | `molding-mes/` | C/S 架构：Node.js + Fastify 服务端、Android（Kotlin + Compose）客户端、平台管理后台 | 多租户 SaaS 化 MES：授权与席位管理、RBAC 五类角色、AI 自然语言下单、自动排产与角色化通知、交接班与报工 |
 | v1.x / v2.x | 仓库根目录（`apps/web`、`apps/api`、`apps/scheduler`、`compose.yaml`） | B/S 架构：React + NestJS + Python FastAPI | 早期单机版排产系统，保留用于回溯；部署方式见下文 |
 
 > v3.0 与旧版相互独立：旧版继续用根目录的 `compose.yaml` 部署，新版用 `molding-mes/docker-compose.yml`，两者数据模型不互通。
 
-### v3.2 快速开始
+### v3.3 快速开始
 
 ```bash
 # 1) 排产求解器（可选，不启动则自动降级到内置列表调度）
@@ -24,6 +25,7 @@ uvicorn main:app --host 127.0.0.1 --port 8090
 # 2) 服务端
 cd molding-mes/server
 cp .env.example .env        # 修改 JWT_SECRET、PLATFORM_TOKEN；确认 OPTIMIZER_URL
+                            # 微信：填 WX_APPID / WX_SECRET，WX_BIND_MODE 保持 auto
 npm install
 npm run migrate             # 建表（sqlite 或 mysql，由 DB_DIALECT 决定）
 npm run seed                # 写入演示数据（含小程序授权与老板/PMC 演示账号）
@@ -33,7 +35,18 @@ npm start                   # 服务端，默认 http://localhost:8080
 排产结果的 `summary.algorithm` 会标明本轮用了哪条路径：`cp-sat-v3.1`（求解器）或 `list-schedule-fallback`（降级）。
 
 管理后台访问 `http://localhost:8080/admin`，安卓客户端用 Android Studio 打开 `molding-mes/android` 编译，
-微信小程序用微信开发者工具打开 `molding-mes/miniprogram`（需先改 AppID，见该目录 README）。
+微信小程序用微信开发者工具打开 `molding-mes/miniprogram`（已内置 AppID，见该目录 README）。
+
+### 微信小程序员工绑定流程
+
+```
+管理员：后台「小程序授权」页 → 开通手机号并勾选可见范围 → 生成绑定码（6 位，30 分钟有效）
+员工  ：小程序首登 → 输入手机号 + 绑定码（或扫 MPBIND:XXXXXX 二维码）→ 绑定成功
+```
+
+> 该 AppID 为**个人主体**，无法使用 `getPhoneNumber` 手机号快速验证组件
+> （该能力需企业认证 + 按次付费），所以默认走绑定码方式。后台「检测手机号组件可用性」
+> 可一键确认要不要切到 `WX_BIND_MODE=phone`。
 
 ### 微信小程序权限速查
 

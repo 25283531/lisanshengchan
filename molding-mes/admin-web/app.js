@@ -201,6 +201,9 @@ async function wxAccess() {
   state._wx = d;
   state._wxRoles = roles;
   state._emps = emps;
+  let codes = { items: [] };
+  try { codes = await api('GET', '/api/admin/wx-bind-codes'); } catch { /* 新表未迁移时容错 */ }
+  state._wxCodes = codes;
   const mode = d.mode || {};
   const modeTag = mode.mode === 'wechat' ? 'ok' : (mode.mode === 'dev' ? 'warn' : 'err');
 
@@ -221,6 +224,45 @@ async function wxAccess() {
       ${mode.appid ? `　AppID：<code>${esc(mode.appid)}</code>` : ''}</p>
     <p class="hint">开通规则：手机号必须先是本公司员工（在「员工授权」里录入并有角色），再在这里开通小程序。
       不勾选视图则按角色默认视图；勾选后以勾选为准。</p>
+    <div class="row">
+      <button id="w-probe" style="width:auto">检测手机号组件可用性</button>
+      <span class="muted" id="w-probe-out">${state._wxProbe ? esc(`结论：${state._wxProbe.verdict}｜${state._wxProbe.detail || ''}`) : '手机号快速验证组件（getPhoneNumber）需企业认证 + 按次付费，个人主体小程序用不了'}</span>
+    </div>
+  </section>
+
+  <section>
+    <header><h2>生成绑定码</h2><span class="spacer"></span><span class="muted">给员工首登时用</span></header>
+    <p class="hint">绑定码是管理员签发的一次性凭证，员工在小程序里输入「手机号 + 绑定码」完成身份绑定。
+      不依赖微信的手机号付费组件，任何主体的小程序都能用。</p>
+    <div class="row">
+      <label>员工手机号
+        <select id="bc-phone">
+          ${d.items.length
+    ? d.items.map((i) => `<option value="${esc(i.phone)}"${i.enabled ? '' : ' disabled'}>${esc(i.phone)} ${esc(i.name || '')}${i.not_employee ? '（非员工）' : `（${esc(i.role_zh || '')}）`}${i.enabled ? '' : '（已关闭）'}</option>`).join('')
+    : '<option value="">尚未开通任何人</option>'}
+        </select>
+      </label>
+      <label>有效期（分钟）<input id="bc-ttl" type="number" value="30" min="1" max="1440" style="width:120px"></label>
+      <button id="bc-gen" class="primary" style="width:auto">生成</button>
+    </div>
+    ${state._wxCode ? `
+    <div class="bindcode">
+      <div class="bc-label">${esc(state._wxCode.phone)}　${esc(state._wxCode.role_zh || '')}　${esc(state._wxCode.name || '')}</div>
+      <div class="bc-value">${esc(state._wxCode.code)}</div>
+      <div class="muted">有效期至 ${esc(state._wxCode.expires_at)}　扫码载荷：<code>${esc(state._wxCode.scan_payload)}</code></div>
+      <div class="row"><button id="bc-copy" style="width:auto">复制</button><span class="muted">${esc(state._wxCode.hint)}</span></div>
+    </div>` : ''}
+    <table><thead><tr><th>绑定码</th><th>手机号</th><th>姓名/角色</th><th>生成时间</th><th>有效期至</th><th>状态</th><th></th></tr></thead>
+      <tbody>${codes.items.map((c) => `<tr>
+        <td><code>${esc(c.code)}</code></td>
+        <td>${esc(c.phone)}</td>
+        <td>${esc(c.name || '—')}${c.role_zh ? `　<span class="tag">${esc(c.role_zh)}</span>` : ''}</td>
+        <td>${esc(c.created_at)}</td>
+        <td>${esc(c.expires_at)}</td>
+        <td><span class="tag ${c.used_at ? (c.used_openid === 'REVOKED' ? 'warn' : 'ok') : (c.expired ? 'err' : 'ok')}">${
+    c.used_at ? (c.used_openid === 'REVOKED' ? '已作废' : '已使用') : (c.expired ? '已过期' : '可用')}</span></td>
+        <td>${c.usable ? `<button class="danger" data-bcdel="${c.id}">作废</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="muted">还没有生成过绑定码</td></tr>'}</tbody></table>
   </section>
 
   <section>
@@ -304,6 +346,46 @@ function bindWx() {
   }));
   $$('[data-wxdel]').forEach((b) => b.addEventListener('click', async () => {
     try { await api('DELETE', `/api/admin/wx-access/${b.dataset.wxdel}`); toast('已取消授权', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  }));
+
+  /* 绑定码 */
+  const probeBtn = $('#w-probe');
+  if (probeBtn) probeBtn.addEventListener('click', async () => {
+    const out = $('#w-probe-out');
+    out.textContent = '检测中…';
+    try {
+      const r = await api('GET', '/api/admin/wx-phone-check');
+      state._wxProbe = r;
+      out.textContent = `结论：${r.verdict}｜${r.detail || ''}${r.hint ? `｜${r.hint}` : ''}｜建议：${r.recommend}`;
+      toast('检测完成', r.usable === true ? 'ok' : 'err');
+    } catch (e) { out.textContent = `检测失败：${e.message}`; }
+  });
+
+  const genBtn = $('#bc-gen');
+  if (genBtn) genBtn.addEventListener('click', async () => {
+    const phone = $('#bc-phone') && $('#bc-phone').value;
+    if (!phone) return toast('请先开通该员工的小程序访问权', 'err');
+    try {
+      const r = await api('POST', '/api/admin/wx-bind-code', {
+        phone, ttlMinutes: Number(($('#bc-ttl') || {}).value || 30),
+      });
+      state._wxCode = r;
+      toast(`已生成 ${phone} 的绑定码`, 'ok');
+      $('#bc-ttl').value = 30;
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  const copyBtn = $('#bc-copy');
+  if (copyBtn) copyBtn.addEventListener('click', () => {
+    const text = state._wxCode ? `${state._wxCode.code}（${state._wxCode.phone}）` : '';
+    navigator.clipboard?.writeText(text).then(
+      () => toast('已复制', 'ok'),
+      () => toast('复制失败，请手动选中', 'err'),
+    );
+  });
+  $$('[data-bcdel]').forEach((b) => b.addEventListener('click', async () => {
+    try { await api('DELETE', `/api/admin/wx-bind-code/${b.dataset.bcdel}`); toast('绑定码已作废', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   }));
 }

@@ -49,6 +49,8 @@ export const mpConfig = () => get('/api/mp/config', false);
 export const mpLogin = (code, extra = {}) => post('/api/mp/login', { code, ...extra }, false);
 export const mpBind = (payload) => post('/api/mp/bind', payload, false);
 export const mpUnbind = (code) => post('/api/mp/unbind', { code });
+/** 绑定码绑定：替代付费的手机号快速验证组件，个人主体小程序也能用 */
+export const mpBindByCode = (payload) => post('/api/mp/bind-code', payload, false);
 export const mpMe = () => get('/api/mp/me');
 export const mpView = (view) => get(`/api/mp/view/${encodeURIComponent(view)}`);
 

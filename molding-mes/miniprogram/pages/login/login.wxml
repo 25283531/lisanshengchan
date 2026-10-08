@@ -8,16 +8,31 @@
   <block wx:if="{{mode === 'wechat'}}">
     <view class="card" wx:if="{{step === 'login'}}">
       <button class="primary" type="primary" bindtap="onWechatLogin">微信一键登录</button>
-      <view class="hint">使用微信身份登录，首次登录需授权手机号。只有管理员开通过的手机号才能进入。</view>
+      <view class="hint">使用微信身份登录。首次登录需绑定手机号，只有管理员开通过的手机号才能进入。</view>
     </view>
 
     <view class="card" wx:else>
-      <view class="card-title">授权手机号</view>
-      <view class="muted">系统按手机号判定你能查看哪些数据，请点击下方按钮授权。</view>
-      <button class="primary" type="primary" open-type="getPhoneNumber" bindgetphonenumber="onGetPhone">
-        微信手机号授权
-      </button>
-      <view class="hint">若提示「未开通小程序访问权」，请联系贵公司管理员在后台「小程序授权」中添加你的手机号。</view>
+      <view class="card-title">绑定手机号</view>
+      <view class="muted">系统按手机号判定你能查看哪些数据，请选择下方任一方式完成绑定。</view>
+
+      <!-- 方式一：绑定码（默认，任何主体的小程序都可用） -->
+      <block wx:if="{{useBindCode}}">
+        <view class="field-label">手机号</view>
+        <input class="line" type="number" maxlength="11" placeholder="请输入已开通的手机号" value="{{phone}}" bindinput="onPhoneInput" />
+        <view class="field-label">绑定码</view>
+        <input class="line" placeholder="管理员给的 6 位绑定码" value="{{bindCode}}" bindinput="onBindCodeInput" />
+        <view class="row">
+          <button class="primary" type="primary" bindtap="onBindByCode">绑定并登录</button>
+          <button class="ghost" bindtap="onScanBind">扫码</button>
+        </view>
+        <view class="hint">绑定码由公司管理员在后台「小程序授权」页生成，30 分钟内有效、用过作废。若提示「尚未开通小程序访问权」，请联系管理员先添加你的手机号。</view>
+      </block>
+
+      <!-- 方式二：手机号快速验证组件（需企业认证 + 付费，仅当管理员显式启用时出现） -->
+      <view wx:if="{{usePhoneComponent}}" class="mt">
+        <button type="primary" plain open-type="getPhoneNumber" bindgetphonenumber="onGetPhone">微信手机号一键授权</button>
+        <view class="hint">若按钮无响应或提示无权限，说明该小程序未开通此能力，请改用绑定码。</view>
+      </view>
     </view>
   </block>
 
@@ -27,11 +42,11 @@
       <view class="card-title">开发模式登录</view>
       <input class="line" type="number" maxlength="11" placeholder="请输入已开通的手机号" value="{{phone}}" bindinput="onPhoneInput" />
       <button class="primary" type="primary" bindtap="onDevLogin">登录</button>
-      <view class="hint">当前服务端未配置小程序凭证或已开启开发模式，跳过微信鉴权。上线前请在服务端 .env 填入 WX_APPID / WX_SECRET 并关闭 WX_DEV_MODE。</view>
+      <view class="hint">开发模式：code 以 dev- 开头时跳过微信鉴权。上线前请在服务端 .env 填入正确的 AppID / Secret 并将 WX_DEV_MODE 置 false。</view>
     </view>
   </block>
 
-  <!-- 未接入 -->
+  <!-- 未接入 / 连不上 -->
   <view class="card" wx:elif="{{mode === 'error' || mode === 'disabled'}}">
     <view class="empty">
       <view>{{note || '服务端未启用小程序'}}</view>

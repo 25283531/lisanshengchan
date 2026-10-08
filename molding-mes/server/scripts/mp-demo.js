@@ -37,9 +37,12 @@ console.log('\n════ 1. 小程序启动配置 ════');
 {
   const r = await call('GET', '/api/mp/config');
   check('接口可达', r.body.code === 0);
-  check('开发模式已开启', r.body.data.mode === 'dev', JSON.stringify(r.body.data));
-  console.log(`     模式：${r.body.data.mode}　说明：${r.body.data.note}`);
-  console.log(`     视图字典：${r.body.data.views.map((v) => v.zh).join('、')}`);
+  const cfg = r.body.data;
+  // 配置了真实凭证 → mode 为 wechat；未配置才是 dev。dev 桩是否可用看 dev_mode
+  check('模式判定正确', cfg.configured ? cfg.mode === 'wechat' : cfg.mode === 'dev', `mode=${cfg.mode}`);
+  check('可用绑定方式已返回', Array.isArray(cfg.bind_methods) && cfg.bind_methods.length > 0, cfg.bind_methods.join(','));
+  console.log(`     模式：${cfg.mode}　说明：${cfg.note}`);
+  console.log(`     视图字典：${cfg.views.map((v) => v.zh).join('、')}`);
 }
 
 console.log('\n════ 2. 权限拦截（未开通 / 未录入）════');

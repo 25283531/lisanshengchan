@@ -1,7 +1,7 @@
 {
   "description": "注塑生产协同 MES 微信小程序（只读看板）",
   "miniprogramRoot": "./",
-  "appid": "touristappid",
+  "appid": "wx8be948bf11ef3fca",
   "projectname": "molding-mes-miniprogram",
   "compileType": "miniprogram",
   "libVersion": "3.5.0",

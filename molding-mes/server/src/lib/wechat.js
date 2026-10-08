@@ -6,8 +6,9 @@
  *  2. getAccessToken   stable_token 优先，失败回退 cgi-bin/token，内存缓存
  *  3. getuserphonenumber  手机号快速验证组件(<button open-type="getPhoneNumber">)的 code → 真实手机号
  *
- * 开发模式（WX_DEV_MODE=true 且非 production）：不连微信，
- * 直接用提交的手机号换取令牌，便于本地联调与演示。上线必须关闭。
+ * 开发模式（WX_DEV_MODE=true 且非 production）：仅当 code 以 `dev-` 开头时命中，
+ * 不会误伤微信真实 code（真实 code 形如 "0b3xxx"），因此配置了真实凭证也可以保留，
+ * 便于不动真机联调。上线务必把 WX_DEV_MODE 置 false，届时 dev- 桩自动失效。
  */
 import config from '../config.js';
 
@@ -15,10 +16,16 @@ const API = 'https://api.weixin.qq.com';
 
 const cfg = () => config.wechat;
 
+/** 开发模式桩的 code 前缀 */
+const DEV_PREFIX = 'dev-';
+
 export const isConfigured = () => !!(cfg().appId && cfg().secret);
 
 /** 开发模式：仅在非生产且显式开启时可用 */
 export const devModeAvailable = () => cfg().devMode && config.env !== 'production';
+
+/** 绑定方式：auto 走绑定码，phone 走手机号快速验证组件 */
+export const bindMode = () => (String(cfg().bindMode || 'auto').toLowerCase() === 'phone' ? 'phone' : 'auto');
 
 async function wxGet(pathname, params = {}) {
   const url = new URL(API + pathname);
@@ -70,12 +77,18 @@ async function wxPost(pathname, body, params = {}) {
  * @returns {{openid:string, unionid?:string, sessionKey:string, appid:string, dev:boolean}}
  */
 export async function jscode2session(code) {
-  if (!code) throw new Error('缺少 wx.login 的 code');
-  if (!isConfigured()) {
-    if (!devModeAvailable()) throw new Error('未配置 WX_APPID / WX_SECRET，且未开启开发模式');
-    // 开发模式：code 原样当作身份标识，便于区分不同"虚拟微信用户"
-    return { openid: `dev-${String(code).slice(0, 24)}`, unionid: null, sessionKey: 'dev', appid: cfg().appId || 'dev', dev: true };
+  const raw = String(code || '');
+  if (!raw) throw new Error('缺少 wx.login 的 code');
+
+  // 开发模式桩：只有 dev- 前缀才命中，与微信真实 code 不会冲突
+  if (raw.startsWith(DEV_PREFIX)) {
+    if (!devModeAvailable()) throw new Error('开发模式未开启（需 WX_DEV_MODE=true 且非 production）');
+    const tail = raw.slice(DEV_PREFIX.length).slice(0, 32) || 'anon';
+    return { openid: `${DEV_PREFIX}${tail}`, unionid: null, sessionKey: 'dev', appid: cfg().appId || 'dev', dev: true };
   }
+
+  if (!isConfigured()) throw new Error('未配置 WX_APPID / WX_SECRET，无法换取微信身份');
+
   const j = await wxGet('/sns/jscode2session', {
     appid: cfg().appId,
     secret: cfg().secret,
@@ -138,17 +151,57 @@ export async function getPhoneNumber(code) {
   };
 }
 
+/**
+ * 手机号组件自检。
+ *
+ * 用一个必然无效的 code 调用 getuserphonenumber，根据微信返回的错误码反推可用性：
+ *   - 40029 invalid code  → 接口可达且未报无权限（先用 code 校验），但无法确定是否还有额度
+ *   - 48001 / unauthorized→ 无接口权限（典型：个人主体、未完成微信认证）
+ *   - 1400001             → 额度已用尽，需购买资源包
+ * 结论只是参考：**不能以 40029 就断定一定能扣到手机号**，所以绑定方式的默认值是 auto（走绑定码）。
+ */
+export async function phoneComponentProbe() {
+  const base = { bind_mode: bindMode() };
+  if (!isConfigured()) {
+    return { ...base, usable: false, verdict: 'no_credentials', detail: '未配置 WX_APPID / WX_SECRET' };
+  }
+  let token;
+  try {
+    token = await getAccessToken();
+  } catch (e) {
+    return { ...base, usable: false, verdict: 'bad_credentials', detail: e.message };
+  }
+  try {
+    await wxPost('/wxa/business/getuserphonenumber', { code: 'PROBE_INVALID_CODE' }, { access_token: token });
+    // 未报错（理论不可能，无效 code 必然报错）
+    return { ...base, usable: true, verdict: 'usable', detail: '接口调用成功' };
+  } catch (e) {
+    const code = e.errcode;
+    const msg = String(e.message || '');
+    if (code === 1400001) return { ...base, usable: false, verdict: 'no_quota', detail: msg, hint: '额度已用尽，需在公众平台「付费管理」购买资源包' };
+    if (code === 48001 || /unauthorized/i.test(msg)) {
+      return { ...base, usable: false, verdict: 'unauthorized', detail: msg, hint: '手机号快速验证组件仅对已微信认证的非个人主体小程序开放；个人主体无法使用，请改用管理员生成的绑定码' };
+    }
+    if (code === 40029) {
+      return { ...base, usable: null, verdict: 'unknown', detail: msg, hint: '接口可达且未报无权限，但无法确定是否仍有额度。建议保持 auto（绑定码）方式' };
+    }
+    if (code === 41019 || code === 48002) return { ...base, usable: false, verdict: 'forbidden', detail: msg, hint: '该小程序无此接口权限' };
+    return { ...base, usable: null, verdict: 'unknown', detail: msg };
+  }
+}
+
 /** 微信登录链路自检：给管理后台展示当前是真实模式还是开发模式 */
 export function modeInfo() {
   return {
     configured: isConfigured(),
     appid: cfg().appId || null,
     dev_mode: devModeAvailable(),
+    bind_mode: bindMode(),
     mode: isConfigured() ? 'wechat' : (devModeAvailable() ? 'dev' : 'disabled'),
     note: isConfigured()
-      ? '已接入微信小程序，走 jscode2session + 手机号快速验证'
+      ? '已接入微信小程序：wx.login 换 openid，绑定推荐用管理员生成的绑定码'
       : (devModeAvailable()
-        ? '开发模式：跳过微信鉴权，用手机号直接登录（仅限非生产环境）'
+        ? '开发模式：code 以 dev- 开头时走本地桩，可用手机号直接登录（仅限非生产环境）'
         : '未配置小程序凭证且未开启开发模式，小程序无法登录'),
   };
 }

@@ -87,6 +87,9 @@ pre.json{background:#f7f9fa;border:1px solid var(--line);border-radius:8px;paddi
 .checks .chk small{display:block;color:var(--ink2);font-size:12px;line-height:1.4;margin-top:2px}
 code{background:#f1f4f5;padding:1px 5px;border-radius:4px;font-size:12px}
 
+.bindcode{border:1px dashed var(--brand);border-radius:8px;padding:12px 14px;margin:10px 0;background:rgba(37,99,235,.04)}
+.bindcode .bc-label{font-size:13px;color:#475569;margin-bottom:6px}
+.bindcode .bc-value{font-size:28px;font-weight:700;letter-spacing:6px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#1e293b}
 .stage{border-left:3px solid var(--brand);padding-left:12px;margin-bottom:14px}
 .stage h3{margin:0 0 6px;color:var(--ink)}
 ul.check{list-style:none;margin:0;padding:0}

@@ -112,6 +112,24 @@ export const TABLES = [
   },
 
   {
+    name: 'wx_bind_codes',
+    comment: '小程序绑定邀请码（管理员按手机号生成，员工在手输或扫码后换取绑定，替代付费的手机号组件）',
+    cols: [
+      ['id', 'PK'],
+      ['tenant_id', 'INT'],
+      ['phone', 'STR', 32],
+      ['code', 'STR', 32],
+      ['expires_at', 'DT'],
+      ['used_at', 'DT', null, null, true],
+      ['used_openid', 'STR', 64, null, true],
+      ['created_by', 'INT', null, null, true],
+      ['created_at', 'DT'],
+    ],
+    uniques: [['code']],
+    indexes: [['tenant_id', 'phone']],
+  },
+
+  {
     name: 'customers',
     comment: '客户',
     cols: [

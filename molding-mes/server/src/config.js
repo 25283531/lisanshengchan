@@ -94,11 +94,14 @@ export const config = {
     appId: process.env.WX_APPID || '',
     secret: process.env.WX_SECRET || '',
     /**
-     * 开发模式：跳过 jscode2session，允许用手机号直接换取令牌。
-     * 仅在非 production 下生效，用于本地联调与演示；上线务必置 false。
-     */
+     * 开发模式：允许 dev- 前缀的假 code 走本地桩。仅在非 production 下生效。 */
     devMode: bool(process.env.WX_DEV_MODE, false),
     timeoutMs: num(process.env.WX_TIMEOUT_MS, 10000),
+    /**
+     * 绑定方式：auto = 管理员生成的绑定码（任何主体可用）；
+     * phone = 手机号快速验证组件（需企业认证 + 付费，个人主体不可用）。
+     */
+    bindMode: process.env.WX_BIND_MODE || 'auto',
   },
 
   /** 排产求解器（v3.1 新增） */

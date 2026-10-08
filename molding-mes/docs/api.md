@@ -110,30 +110,38 @@
 }
 ```
 
-## 微信小程序（v3.2）
+## 微信小程序（v3.2 起，v3.3 增加绑定码）
 
 登录与身份：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/mp/config` | 启动配置：当前是微信模式还是开发模式、视图字典（免鉴权） |
+| GET | `/api/mp/config` | 启动配置：模式、`bind_methods`（可用绑定方式）、视图字典（免鉴权） |
 | POST | `/api/mp/login` | `{code}` 换 openid；已绑定直接发令牌，未绑定返回 `need_bind` |
-| POST | `/api/mp/bind` | `{code, phoneCode}` 手机号快速验证后绑定并登录 |
+| POST | `/api/mp/bind-code` | `{code, phone, bindCode}` **绑定码绑定（默认方式）** |
+| POST | `/api/mp/bind` | `{code, phoneCode}` 手机号快速验证组件绑定（需企业认证 + 付费，个人主体不可用） |
 | POST | `/api/mp/unbind` | 解绑当前微信身份 |
 | GET | `/api/mp/me` | 当前身份、可见视图、是否被管理员覆盖 |
 | GET | `/api/mp/view/:view` | 视图数据：`equipment` `inventory` `production` `schedule` `material` `orders` `tasks` |
 
-管理员维护白名单：
+管理员维护白名单与绑定码：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/admin/wx-access` | 白名单列表（含每人生效视图） |
+| GET | `/api/admin/wx-access` | 白名单列表（含每人生效视图、接入模式） |
 | POST | `/api/admin/wx-access` | 按手机号开通 / 更新（`views` 留空走角色默认） |
 | PUT | `/api/admin/wx-access/:id` | 改启用状态 / 勾选视图 |
 | DELETE | `/api/admin/wx-access/:id` | 取消授权（同时置空已绑定微信身份） |
 | GET | `/api/admin/wx-roles` | 角色字典与各角色默认视图 |
+| POST | `/api/admin/wx-bind-code` | 生成一次性绑定码 `{phone, ttlMinutes}`，返回 `code` 与 `scan_payload` |
+| GET | `/api/admin/wx-bind-codes` | 绑定码列表（含可用 / 已使用 / 已过期 / 已作废状态） |
+| DELETE | `/api/admin/wx-bind-code/:id` | 作废未使用的绑定码 |
+| GET | `/api/admin/wx-phone-check` | 手机号快速验证组件可用性自检（返回 `verdict` 与建议） |
 
-登录失败的业务码（HTTP 状态不一定非 200，前端按 `code` 判断）：
+> `POST /api/admin/wx-bind-code` 要求该手机号**既是本公司员工、又已在 `wx_access` 白名单且启用**，
+> 否则分别返回 `NOT_EMPLOYEE` / `WX_NOT_ALLOWED` / `WX_DISABLED`，不给未授权的人发码。
+
+登录与绑定失败的业务码（前端按 `code` 判断）：
 
 | code | 含义 |
 |---|---|
@@ -142,6 +150,11 @@
 | `WX_DISABLED` | 开通过，但被管理员关闭 |
 | `MULTI_TENANT` | 该手机号属于多家公司，需带 `tenantCode` 重登 |
 | `VIEW_FORBIDDEN` | 请求了没有权限的视图 |
+| `NO_BIND_CODE` | 未提交绑定码 |
+| `BIND_CODE_BAD` | 绑定码不存在 |
+| `BIND_CODE_USED` | 绑定码已使用（重放攻击拦截） |
+| `BIND_CODE_EXPIRED` | 绑定码已过期 |
+| `BIND_CODE_MISMATCH` | 绑定码是为其他手机号生成的 |
 
 ## 消息类型
 

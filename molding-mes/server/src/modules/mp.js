@@ -9,23 +9,47 @@
  *
  * 小程序只做只读查询，不做写操作，避免与 APP 的报工/出库产生双写冲突。
  */
+import crypto from 'node:crypto';
 import { wrap, ok, fail, AppError } from '../lib/http.js';
 import { signJwt } from '../lib/auth.js';
-import { nowStr, j, arr, num } from '../lib/util.js';
+import { nowStr, j, arr, num, addMinutes } from '../lib/util.js';
 import { audit } from '../lib/repo.js';
 import { requireUser, requirePerm } from '../middleware.js';
 import {
   MP_VIEWS, ALL_MP_VIEWS, ROLE_VIEWS, resolveViews, roleZh, ROLES,
 } from '../lib/rbac.js';
-import { jscode2session, getPhoneNumber, modeInfo, isConfigured, devModeAvailable } from '../lib/wechat.js';
+import {
+  jscode2session, getPhoneNumber, modeInfo, isConfigured, devModeAvailable,
+  bindMode, phoneComponentProbe,
+} from '../lib/wechat.js';
 import { buildMpView } from '../domain/mpview.js';
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
+/** 绑定码默认有效期（分钟） */
+const BIND_CODE_TTL = 30;
+/** 去掉易混淆字符，方便人工抄录 */
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+const randomCode = (len = 6) => Array.from(
+  { length: len },
+  () => CODE_ALPHABET[crypto.randomInt(0, CODE_ALPHABET.length)],
+).join('');
+
+/** 数据库时间字符串 → Date（兼容 SQLite 的 "YYYY-MM-DD HH:mm:ss"） */
+const toDt = (s) => new Date(String(s || '').replace(' ', 'T'));
+
+/** 当前支持的绑定方式；auto 模式下始终提供绑定码 */
+function bindMethods() {
+  const m = ['bind_code'];
+  if (isConfigured() && bindMode() === 'phone') m.unshift('phone_component');
+  return m;
+}
 
 export default function registerMpRoutes(app, db, ctx) {
   /* ------------------------- 启动配置（免鉴权） ------------------------- */
   app.get('/api/mp/config', wrap(async () => ok({
     ...modeInfo(),
+    bind_methods: bindMethods(),
     views: Object.entries(MP_VIEWS).map(([k, v]) => ({ view: k, ...v })),
   })));
 
@@ -43,8 +67,9 @@ export default function registerMpRoutes(app, db, ctx) {
       'SELECT * FROM wx_users WHERE appid = ? AND openid = ?', [appid, openid],
     );
 
-    // 开发模式直接带手机号：一步完成绑定并登录
-    if (devModeAvailable() && b.phone) {
+    // 开发模式一步登录：只有 code 命中 dev- 桩时才允许自报手机号，
+    // 防止真实微信 code 的用户绕过校验冒绑他人手机号
+    if (devModeAvailable() && b.phone && String(openid).startsWith('dev-')) {
       const phone = String(b.phone).trim();
       if (!PHONE_RE.test(phone)) return fail('手机号格式不正确', 'BAD_PHONE', 400);
       return ok(await bindAndIssue({ openid, appid, unionid, phone, tenantCode: b.tenantCode, nickname: b.nickname }), '登录成功');
@@ -65,11 +90,47 @@ export default function registerMpRoutes(app, db, ctx) {
       bound: false,
       need_bind: true,
       openid,
-      hint: isConfigured()
+      bind_methods: bindMethods(),
+      hint: bindMode() === 'phone' && isConfigured()
         ? '请点击「微信手机号授权」完成绑定'
-        : '开发模式：请提交手机号完成绑定',
+        : '请输入手机号和管理员给你的绑定码完成绑定（可在后台「小程序授权」页生成）',
       dev_mode: devModeAvailable(),
-    }, '尚未绑定，请授权手机号');
+    }, '尚未绑定，请完成手机号绑定');
+  }));
+
+  /**
+   * 绑定码绑定（默认方式，任何主体的小程序都可用）。
+   *
+   * 手机号快速验证组件（getPhoneNumber）仅限已微信认证的非个人主体小程序且按次收费，
+   * 个人主体调不通。这里用「管理员生成的一次性绑定码」替代：
+   * 绑定码由后台按手机号签发，含租户信息，一次性、30 分钟过期。
+   */
+  app.post('/api/mp/bind-code', wrap(async (req) => {
+    const b = req.body || {};
+    const { openid, appid, unionid } = await resolveOpenid(b);
+    const phone = String(b.phone || '').trim();
+    // 注意：b.code 是 wx.login 的登录凭据，绑定码在 b.bindCode，别混用
+    const bindCode = String(b.bindCode || b.bind_code || '').trim().toUpperCase();
+    if (!PHONE_RE.test(phone)) return fail('手机号格式不正确', 'BAD_PHONE', 400);
+    if (!bindCode) return fail('缺少绑定码', 'NO_BIND_CODE', 400);
+
+    const rec = await db.get('SELECT * FROM wx_bind_codes WHERE code = ?', [bindCode]);
+    if (!rec) return fail('绑定码不正确，请向管理员确认', 'BIND_CODE_BAD', 400);
+    if (rec.used_at) return fail('该绑定码已被使用', 'BIND_CODE_USED', 400);
+    if (toDt(rec.expires_at) < new Date()) return fail('绑定码已过期，请让管理员重新生成', 'BIND_CODE_EXPIRED', 400);
+    if (String(rec.phone) !== phone) {
+      return fail('绑定码与手机号不匹配（该绑定码是为其他手机号生成的）', 'BIND_CODE_MISMATCH', 400);
+    }
+    const tenant = await db.get('SELECT code FROM tenants WHERE id = ?', [rec.tenant_id]);
+    if (!tenant) return fail('绑定码对应的公司不存在', 'BIND_CODE_BAD', 400);
+
+    const result = await bindAndIssue({
+      openid, appid, unionid, phone, tenantCode: tenant.code, nickname: b.nickname, avatarUrl: b.avatarUrl,
+    });
+    await db.run('UPDATE wx_bind_codes SET used_at = ?, used_openid = ? WHERE id = ?',
+      [nowStr(), openid, rec.id]);
+    await audit(db, { tenantId: rec.tenant_id, userId: null, action: 'wx.bind_code.use', detail: { bindCode, openid } });
+    return ok(result, '绑定成功');
   }));
 
   /** 绑定手机号（微信手机号快速验证组件） */
@@ -81,10 +142,10 @@ export default function registerMpRoutes(app, db, ctx) {
     if (isConfigured() && b.phoneCode) {
       const info = await getPhoneNumber(String(b.phoneCode));
       phone = info.purePhone || info.phone;
-    } else if (devModeAvailable() && b.phone) {
+    } else if (devModeAvailable() && b.phone && String(openid).startsWith('dev-')) {
       phone = String(b.phone).trim();
     } else {
-      return fail('缺少手机号授权信息（phoneCode 或开发模式下的 phone）', 'NO_PHONE', 400);
+      return fail('缺少绑定依据：请提供手机号组件的 phoneCode，或管理员签发的绑定码（/api/mp/bind-code）', 'NO_PHONE', 400);
     }
     if (!PHONE_RE.test(phone)) return fail('手机号格式不正确', 'BAD_PHONE', 400);
 
@@ -256,6 +317,100 @@ export default function registerMpRoutes(app, db, ctx) {
     })));
   }));
 
+  /* --------------------- 管理员：绑定码 + 组件自检 --------------------- */
+
+  app.get('/api/admin/wx-bind-codes', wrap(async (req) => {
+    const user = requirePerm(req, 'wx.manage');
+    const rows = await db.query(
+      `SELECT c.*, u.name AS user_name, u.role
+       FROM wx_bind_codes c
+       LEFT JOIN users u ON u.tenant_id = c.tenant_id AND u.phone = c.phone
+       WHERE c.tenant_id = ? ORDER BY c.created_at DESC LIMIT 50`,
+      [user.tenant_id],
+    );
+    const now = Date.now();
+    return ok({
+      items: rows.map((r) => ({
+        id: r.id, phone: r.phone, name: r.name || r.user_name || null,
+        role: r.role || null, role_zh: r.role ? roleZh(r.role) : null,
+        code: r.code, expires_at: r.expires_at, created_at: r.created_at,
+        used_at: r.used_at, used_openid: r.used_openid,
+        /** 已过期 / 已作废的码置灰，避免管理员拿错 */
+        usable: !r.used_at && toDt(r.expires_at).getTime() > now,
+        expired: !r.used_at && toDt(r.expires_at).getTime() <= now,
+      })),
+    });
+  }));
+
+  /**
+   * 生成一次性绑定码。
+   * 前置：手机号已在本公司 wx_access 白名单且启用 —— 避免给没开通的人发码。
+   */
+  app.post('/api/admin/wx-bind-code', wrap(async (req) => {
+    const user = requirePerm(req, 'wx.manage');
+    const tid = user.tenant_id;
+    const b = req.body || {};
+    const phone = String(b.phone || '').trim();
+    if (!PHONE_RE.test(phone)) return fail('手机号格式不正确（需 11 位中国大陆号码）', 'BAD_PHONE', 400);
+
+    const emp = await db.get('SELECT * FROM users WHERE tenant_id = ? AND phone = ?', [tid, phone]);
+    if (!emp) return fail(`手机号 ${phone} 还不是本公司员工，请先到「员工授权」录入`, 'NOT_EMPLOYEE', 400);
+    if (emp.status !== 'ACTIVE') return fail(`该员工账号状态为 ${emp.status}`, 'USER_DISABLED', 400);
+
+    const access = await db.get('SELECT * FROM wx_access WHERE tenant_id = ? AND phone = ?', [tid, phone]);
+    if (!access) return fail(`${phone}（${roleZh(emp.role)}）还没有开通小程序访问权，请先在上方名单里开通`, 'WX_NOT_ALLOWED', 400);
+    if (!access.enabled) return fail('该手机号的小程序访问权处于关闭状态，请先恢复', 'WX_DISABLED', 400);
+
+    const ttl = Math.min(Math.max(num(b.ttlMinutes, BIND_CODE_TTL), 1), 1440);
+    // 用本地时间口径，与 nowStr() 保持一致（不能用 toISOString，否则在中国时区会被判成已过期）
+    const expiresAt = addMinutes(nowStr(), ttl);
+    let code = randomCode(6);
+    // 极小概率撞码，重试几次
+    for (let i = 0; i < 5; i += 1) {
+      const dup = await db.get('SELECT id FROM wx_bind_codes WHERE code = ?', [code]);
+      if (!dup) break;
+      code = randomCode(6);
+    }
+    await db.run(
+      `INSERT INTO wx_bind_codes (tenant_id, phone, code, expires_at, created_by, created_at)
+       VALUES (?,?,?,?,?,?)`,
+      [tid, phone, code, expiresAt, user.id, nowStr()],
+    );
+    await audit(db, { tenantId: tid, userId: user.id, action: 'wx.bind_code.issue', detail: { phone, ttl } });
+    return ok({
+      phone, name: emp.name, role: emp.role, role_zh: roleZh(emp.role),
+      code, expires_at: expiresAt, ttl_minutes: ttl,
+      /** 给扫码用：纯文本载荷，任何二维码生成器都能扫 */
+      scan_payload: `MPBIND:${code}`,
+      hint: `把 ${code} 发给本人，在小程序里输入手机号后填入。${ttl} 分钟内有效，用过作废`,
+    }, `已生成 ${phone} 的绑定码`);
+  }));
+
+  app.delete('/api/admin/wx-bind-code/:id', wrap(async (req) => {
+    const user = requirePerm(req, 'wx.manage');
+    const id = Number(req.params.id);
+    const row = await db.get('SELECT * FROM wx_bind_codes WHERE id = ? AND tenant_id = ?', [id, user.tenant_id]);
+    if (!row) return fail('记录不存在', 'NOT_FOUND', 404);
+    if (row.used_at) return fail('该绑定码已使用，无法作废', 'ALREADY_USED', 400);
+    await db.run('UPDATE wx_bind_codes SET used_at = ?, used_openid = ? WHERE id = ?', [nowStr(), 'REVOKED', id]);
+    await audit(db, { tenantId: user.tenant_id, userId: user.id, action: 'wx.bind_code.revoke', detail: { phone: row.phone, code: row.code } });
+    return ok(null, '绑定码已作废');
+  }));
+
+  /**
+   * 手机号快速验证组件自检。
+   * 用一个必然无效的 code 试探，依据微信返回的错误码判断该小程序能否使用该组件。
+   */
+  app.get('/api/admin/wx-phone-check', wrap(async (req) => {
+    requirePerm(req, 'wx.manage');
+    const probe = await phoneComponentProbe();
+    return ok({
+      ...probe,
+      recommend: probe.usable === true ? '可启用手机号一键绑定（WX_BIND_MODE=phone）'
+        : '建议使用绑定码方式（保持 WX_BIND_MODE=auto）',
+    });
+  }));
+
   /* ============================== 内部方法 ============================== */
 
   async function resolveOpenid(b) {
@@ -268,12 +423,24 @@ export default function registerMpRoutes(app, db, ctx) {
   /** 校验手机号 → 绑定微信身份 → 签发令牌 */
   async function bindAndIssue({ openid, appid, unionid, phone, tenantCode, nickname, avatarUrl }) {
     const { user, tenant, access } = await locateEmployee(phone, tenantCode);
-    await db.run(
-      `UPDATE wx_users SET tenant_id = ?, user_id = ?, phone = ?, nickname = ?, avatar_url = ?,
-              status = ?, bound_at = ?, last_login_at = ?, updated_at = ?
-       WHERE appid = ? AND openid = ?`,
-      [tenant.id, user.id, phone, nickname || null, avatarUrl || null, 'ACTIVE', nowStr(), nowStr(), nowStr(), appid, openid],
-    );
+    // 直接调 bind/bind-code 时可能还没有 wx_users 行（未先调 login），这里做 upsert
+    const exist = await db.get('SELECT id FROM wx_users WHERE appid = ? AND openid = ?', [appid, openid]);
+    if (exist) {
+      await db.run(
+        `UPDATE wx_users SET tenant_id = ?, user_id = ?, phone = ?, nickname = ?, avatar_url = ?,
+                status = ?, bound_at = ?, last_login_at = ?, updated_at = ?
+         WHERE appid = ? AND openid = ?`,
+        [tenant.id, user.id, phone, nickname || null, avatarUrl || null, 'ACTIVE', nowStr(), nowStr(), nowStr(), appid, openid],
+      );
+    } else {
+      await db.run(
+        `INSERT INTO wx_users (appid, openid, unionid, tenant_id, user_id, phone, nickname, avatar_url,
+                               status, bound_at, last_login_at, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [appid, openid, unionid || null, tenant.id, user.id, phone,
+          nickname || null, avatarUrl || null, 'ACTIVE', nowStr(), nowStr(), nowStr(), nowStr()],
+      );
+    }
     await db.run('UPDATE users SET last_login_at = ? WHERE id = ?', [nowStr(), user.id]);
     await audit(db, { tenantId: tenant.id, userId: user.id, action: 'wx.bind', detail: { openid, phone } });
     return await profile(user, tenant, access, { bound: true, openid });
