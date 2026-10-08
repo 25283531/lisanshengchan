@@ -183,7 +183,9 @@ async function callAiOnce(text, ctx, cfg) {
         temperature: num(cfg.temperature, 0.1),
         // 必须限制输出长度：语义解析的结果就几行 JSON，
         // 不加的话推理型模型会一路生成到自然停止，实测把 7 秒拖成 20~30 秒。
-        max_tokens: 800,
+        // 但要留出富余：gpt-oss-20b 的思考过程也占用这个额度，多行建档容易超限被截断。
+        // （注意：不要加 reasoning_effort=low——实测快一倍但正确率 36/36 掉到 35/36）
+        max_tokens: 1600,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: sys },

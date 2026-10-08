@@ -146,8 +146,9 @@ export async function testAiConnection(cfg, onResult) {
       body: JSON.stringify({
         model: n.model,
         temperature: 0,
-        // 连通性探测只要一句确认，必须限长，否则推理型模型会生成到自然停止，慢一个数量级
-        max_tokens: 32,
+        // 连通性探测只要一句确认，但也得给够：gpt-oss-20b 是推理模型，
+        // 会先消耗 ~65 个思考 token 才吐出正文，实测 32 会被思考占满导致正文为空。
+        max_tokens: 256,
         messages: [
           { role: 'system', content: '你是一个连通性测试助手。' },
           { role: 'user', content: '输出 JSON：{"ok":true}' },

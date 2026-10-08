@@ -331,8 +331,9 @@ async function callAi(cfg, system, user) {
   const body = JSON.stringify({
     model: cfg.model,
     temperature: num(cfg.temperature, 0.1),
-    // 限制输出长度：不设的话推理型模型会生成到自然停止，实测慢一个数量级
-    max_tokens: 1600,
+    // 限制输出长度：不设的话推理型模型会生成到自然停止，实测慢一个数量级。
+    // 批量录入可能几十行，且思考过程同样占用额度，给到 2400。
+    max_tokens: 2400,
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   });
 
