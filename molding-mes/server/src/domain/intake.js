@@ -328,28 +328,45 @@ ${lines.join('\n')}
 
 async function callAi(cfg, system, user) {
   const url = `${String(cfg.base_url || '').replace(/\/+$/, '')}/chat/completions`;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), num(cfg.timeout_ms, 20000));
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
-      body: JSON.stringify({
-        model: cfg.model,
-        temperature: num(cfg.temperature, 0.1),
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`AI 接口返回 ${res.status}：${(await res.text()).slice(0, 200)}`);
-    const json = await res.json();
-    const content = json?.choices?.[0]?.message?.content;
-    if (!content) throw new Error('AI 返回内容为空');
-    const clean = String(content).replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-    return JSON.parse(clean);
-  } finally {
-    clearTimeout(timer);
+  const body = JSON.stringify({
+    model: cfg.model,
+    temperature: num(cfg.temperature, 0.1),
+    // 限制输出长度：不设的话推理型模型会生成到自然停止，实测慢一个数量级
+    max_tokens: 1600,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+  });
+
+  let last;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), num(cfg.timeout_ms, 20000));
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+        body,
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        const e = new Error(`AI 接口返回 ${res.status}：${(await res.text()).slice(0, 200)}`);
+        e.retryable = res.status >= 500;
+        throw e;
+      }
+      const json = await res.json();
+      const content = json?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('AI 返回内容为空');
+      const clean = String(content).replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      clearTimeout(timer);
+      return JSON.parse(clean);
+    } catch (e) {
+      clearTimeout(timer);
+      last = e;
+      const retryable = e.retryable !== false && e.name !== 'SyntaxError';
+      if (attempt >= 3 || !retryable) throw e;
+      await new Promise((r) => setTimeout(r, attempt * 1000));
+    }
   }
+  throw last;
 }
 
 /** 自然语言 → 记录数组 */

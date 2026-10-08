@@ -161,7 +161,12 @@ export function fallbackParse(text, ctx) {
 
 /* -------------------------------- AI 解析 ------------------------------ */
 
-async function callAi(text, ctx, cfg) {
+/**
+ * 调一次 AI。带重试是因为实测 NVIDIA NIM 会偶发返回 502/瞬时不可用，
+ * 一次抖动不该直接变成"AI 大模型出错"。只有可恢复的故障才重试：
+ * 网络错误、超时、5xx；鉴权/模型不存在（4xx）立即失败，重试也没用。
+ */
+async function callAiOnce(text, ctx, cfg) {
   const sys = buildSystemPrompt(ctx);
   const url = `${String(cfg.base_url || '').replace(/\/+$/, '')}/chat/completions`;
   const ctrl = new AbortController();
@@ -176,6 +181,9 @@ async function callAi(text, ctx, cfg) {
       body: JSON.stringify({
         model: cfg.model,
         temperature: num(cfg.temperature, 0.1),
+        // 必须限制输出长度：语义解析的结果就几行 JSON，
+        // 不加的话推理型模型会一路生成到自然停止，实测把 7 秒拖成 20~30 秒。
+        max_tokens: 800,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: sys },
@@ -186,7 +194,9 @@ async function callAi(text, ctx, cfg) {
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      throw new Error(`AI 接口返回 ${res.status}：${t.slice(0, 200)}`);
+      const e = new Error(`AI 接口返回 ${res.status}：${t.slice(0, 200)}`);
+      e.retryable = res.status >= 500;
+      throw e;
     }
     const json = await res.json();
     const content = json?.choices?.[0]?.message?.content;
@@ -196,6 +206,23 @@ async function callAi(text, ctx, cfg) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function callAi(text, ctx, cfg) {
+  const attempts = 3;
+  let last;
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      return await callAiOnce(text, ctx, cfg);
+    } catch (e) {
+      last = e;
+      const retryable = e.retryable !== false && e.name !== 'SyntaxError';
+      if (i >= attempts || !retryable) throw e;
+      // 退避：1s、2s
+      await new Promise((r) => setTimeout(r, i * 1000));
+    }
+  }
+  throw last;
 }
 
 /** AI 不可用 / 本地也接不住时的统一返回 */

@@ -146,6 +146,8 @@ export async function testAiConnection(cfg, onResult) {
       body: JSON.stringify({
         model: n.model,
         temperature: 0,
+        // 连通性探测只要一句确认，必须限长，否则推理型模型会生成到自然停止，慢一个数量级
+        max_tokens: 32,
         messages: [
           { role: 'system', content: '你是一个连通性测试助手。' },
           { role: 'user', content: '输出 JSON：{"ok":true}' },
