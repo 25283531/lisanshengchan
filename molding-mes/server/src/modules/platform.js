@@ -4,8 +4,9 @@
  */
 import { wrap, ok, fail, AppError } from '../lib/http.js';
 import { hashPassword } from '../lib/auth.js';
-import { nowStr, toStr } from '../lib/util.js';
+import { nowStr, toStr, num } from '../lib/util.js';
 import { audit } from '../lib/repo.js';
+import { readGlobalAi, publicView, envAiConfig, testAiConnection } from '../domain/ai-config.js';
 
 const requirePlatform = (req) => {
   if (!req.user || req.user.role !== 'PLATFORM') {
@@ -116,6 +117,77 @@ export default function registerPlatformRoutes(app, db, ctx) {
     await db.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [hashPassword(pwd), nowStr(), admin.id]);
     await audit(db, { tenantId: id, action: 'platform.admin.reset_password', detail: { user_id: admin.id } });
     return ok({ phone: admin.phone }, '管理员密码已重置');
+  }));
+
+  /* ------------------- 平台级 AI 接口配置（系统管理员） ------------------- */
+
+  app.get('/api/platform/ai-config', wrap(async (req) => {
+    requirePlatform(req);
+    const g = await readGlobalAi(db);
+    // 哪些公司自己覆盖了配置：平台要能一眼看到，避免"公司配错了来找平台"
+    const overrides = await db.query(
+      `SELECT t.id, t.code, t.name, a.model, a.base_url, a.enabled
+       FROM ai_configs a JOIN tenants t ON t.id = a.tenant_id
+       WHERE a.api_key IS NOT NULL AND a.api_key <> '' ORDER BY t.id`,
+    );
+    return ok({
+      ...(publicView(g) || publicView(envAiConfig())),
+      allow_tenant_override: g ? !!num(g.allow_tenant_override, 1) : true,
+      last_test_ok: g ? !!num(g.last_test_ok, 0) : false,
+      last_test_msg: g?.last_test_msg || null,
+      updated_by: g?.updated_by || null,
+      updated_at: g?.updated_at || null,
+      source: g ? 'platform' : 'env',
+      tenant_overrides: overrides,
+    });
+  }));
+
+  app.put('/api/platform/ai-config', wrap(async (req) => {
+    requirePlatform(req);
+    const b = req.body || {};
+    const g = await readGlobalAi(db);
+    const patch = { updated_at: nowStr(), updated_by: '平台管理员' };
+    if (b.provider !== undefined) patch.provider = String(b.provider);
+    if (b.baseUrl !== undefined) patch.base_url = String(b.baseUrl);
+    if (b.apiKey !== undefined) patch.api_key = b.apiKey ? String(b.apiKey) : null;
+    if (b.model !== undefined) patch.model = String(b.model);
+    if (b.temperature !== undefined) patch.temperature = Number(b.temperature);
+    if (b.timeoutMs !== undefined) patch.timeout_ms = Number(b.timeoutMs);
+    if (b.enabled !== undefined) patch.enabled = b.enabled ? 1 : 0;
+    if (b.allowFallback !== undefined) patch.allow_fallback = b.allow_fallback ? 1 : 0;
+    if (b.allowTenantOverride !== undefined) patch.allow_tenant_override = b.allowTenantOverride ? 1 : 0;
+    /** 同上：填了 Key 就默认启用 */
+    if (b.apiKey && b.enabled === undefined) patch.enabled = 1;
+
+    if (g) {
+      const keys = Object.keys(patch);
+      await db.run(`UPDATE ai_global_configs SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE id = ?`,
+        [...keys.map((k) => patch[k]), g.id]);
+    } else {
+      const e = envAiConfig();
+      const keys = Object.keys(patch);
+      await db.run(
+        `INSERT INTO ai_global_configs (${keys.map((k) => `\`${k}\``).join(', ')}, provider, base_url, api_key, model, temperature, timeout_ms, enabled, allow_fallback)
+         VALUES (${keys.map(() => '?').join(', ')}, ?,?,?,?,?,?,?,?)`,
+        [...keys.map((k) => patch[k]), patch.provider ?? e.provider, patch.base_url ?? e.base_url,
+          patch.api_key !== undefined ? patch.api_key : e.api_key, patch.model ?? e.model,
+          patch.temperature ?? e.temperature, patch.timeout_ms ?? e.timeout_ms,
+          patch.enabled ?? e.enabled, patch.allow_fallback ?? e.allow_fallback],
+      );
+    }
+    await audit(db, { action: 'platform.ai_config.update', detail: { ...b, apiKey: b.apiKey ? '***' : null } });
+    return ok(null, '平台 AI 配置已保存');
+  }));
+
+  app.post('/api/platform/ai-config/test', wrap(async (req) => {
+    requirePlatform(req);
+    const g = await readGlobalAi(db);
+    if (!g) return fail('尚未初始化平台 AI 配置', 'NOT_FOUND', 404);
+    const r = await testAiConnection(g, async (okFlag, msg) => {
+      await db.run('UPDATE ai_global_configs SET last_test_ok = ?, last_test_msg = ?, updated_at = ? WHERE id = ?',
+        [okFlag ? 1 : 0, msg, nowStr(), g.id]);
+    });
+    return ok(r);
   }));
 
   app.get('/api/platform/stats', wrap(async (req) => {

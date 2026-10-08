@@ -55,4 +55,57 @@ object Repo {
         call { Session.api.progress(orderId, mapOf("qty" to qty)) }
 
     suspend fun master(): Result<MasterData> = call { Session.api.master() }
+
+    /* ------------------------------ 订单提交 ------------------------------ */
+
+    suspend fun createOrder(productId: Long, quantity: Int, dueDate: String?, note: String?): Result<OrderCreateResult> =
+        call {
+            Session.api.createOrder(
+                mapOf(
+                    "productId" to productId,
+                    "quantity" to quantity,
+                    "dueDate" to dueDate,
+                    "note" to note,
+                    "source" to "APP",
+                )
+            )
+        }
+
+    suspend fun updateOrder(id: Long, quantity: Int? = null, dueDate: String? = null, note: String? = null): Result<Unit> =
+        unit {
+            val body = mutableMapOf<String, Any?>("note" to note)
+            if (quantity != null) body["quantity"] = quantity
+            if (dueDate != null) body["dueDate"] = dueDate
+            Session.api.updateOrder(id, body)
+        }
+
+    /* ------------------------------ 设备维修 ------------------------------ */
+
+    suspend fun maintenanceOverview(): Result<MaintenanceOverview> = call { Session.api.maintenanceOverview() }
+
+    suspend fun maintenancePlans(mineOnly: Boolean = false): Result<List<MaintenancePlan>> =
+        call { Session.api.maintenancePlans(mine = if (mineOnly) 1 else null) }
+
+    suspend fun createMaintenancePlan(
+        targetType: String,
+        targetCode: String,
+        kind: String,
+        faultDesc: String,
+        durationMinutes: Int,
+    ): Result<Map<String, Any?>> = call {
+        Session.api.createMaintenancePlan(
+            mapOf(
+                "targetType" to targetType,
+                "targetCode" to targetCode,
+                "kind" to kind,
+                "faultDesc" to faultDesc,
+                "durationMinutes" to durationMinutes,
+            )
+        )
+    }
+
+    suspend fun setMaintenanceStatus(id: Long, status: String, note: String? = null): Result<Map<String, Any?>> =
+        call { Session.api.maintenancePlanStatus(id, mapOf("status" to status, "note" to note)) }
+
+    suspend fun maintenanceDevices(): Result<DeviceListData> = call { Session.api.maintenanceDevices() }
 }

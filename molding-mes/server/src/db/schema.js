@@ -28,8 +28,30 @@ export const TABLES = [
   },
 
   {
+    name: 'ai_global_configs',
+    comment: '平台级 AI 接口配置（系统管理员统一维护；公司未自定义时按此生效）',
+    cols: [
+      ['id', 'PK'],
+      ['provider', 'STR', 32, 'OPENAI_COMPAT'],
+      ['base_url', 'STR', 255, 'https://api.deepseek.com/v1'],
+      ['api_key', 'STR', 255, null, true],
+      ['model', 'STR', 64, 'deepseek-chat'],
+      ['temperature', 'DEC', null, '0.1'],
+      ['timeout_ms', 'INT', null, 20000],
+      ['enabled', 'BOOL', null, 1],
+      ['allow_fallback', 'BOOL', null, 1],
+      /** 1 = 允许公司自行覆盖；0 = 强制统一，公司只能查看 */
+      ['allow_tenant_override', 'BOOL', null, 1],
+      ['last_test_ok', 'BOOL', null, 0],
+      ['last_test_msg', 'STR', 255, null, true],
+      ['updated_by', 'STR', 64, null, true],
+      ['updated_at', 'DT'],
+    ],
+  },
+
+  {
     name: 'ai_configs',
-    comment: '租户 AI 接口配置（管理后台可改）',
+    comment: '公司级 AI 接口配置（仅在平台允许覆盖时可用，只影响本公司）',
     cols: [
       ['id', 'PK'],
       ['tenant_id', 'INT'],
@@ -451,6 +473,61 @@ export const TABLES = [
       ['created_at', 'DT'],
     ],
     indexes: [['tenant_id', 'created_at']],
+  },
+
+  {
+    name: 'intake_drafts',
+    comment: '基础数据智能录入草稿（自然语言 / Excel 解析结果，确认后落库）',
+    cols: [
+      ['id', 'PK'],
+      ['tenant_id', 'INT'],
+      /** products / customers / materials / molds / machines / mixers / supply_lines / labels */
+      ['target', 'STR', 32],
+      /** TEXT 自然语言 / FILE 表格附件 / MODIFY 自然语言改数 */
+      ['source', 'STR', 16, 'TEXT'],
+      ['raw_text', 'STR', 2000, null, true],
+      ['file_name', 'STR', 255, null, true],
+      ['rows', 'JSON', null, null, true],
+      ['row_count', 'INT', null, 0],
+      /** DRAFT 待确认 / COMMITTED 已入库 / DISCARDED 已放弃 */
+      ['status', 'STR', 20, 'DRAFT'],
+      ['used_fallback', 'BOOL', null, 0],
+      ['message', 'STR', 255, null, true],
+      ['created_by', 'INT', null, null, true],
+      ['created_at', 'DT'],
+      ['updated_at', 'DT'],
+    ],
+    indexes: [['tenant_id', 'target']],
+  },
+
+  {
+    name: 'maintenance_plans',
+    comment: '设备维修/保养计划（技术员提交、管理员推进，状态全程可追溯）',
+    cols: [
+      ['id', 'PK'],
+      ['tenant_id', 'INT'],
+      ['code', 'STR', 64],
+      /** MACHINE 机台 / MOLD 模具 */
+      ['target_type', 'STR', 16, 'MACHINE'],
+      ['target_code', 'STR', 64],
+      ['target_name', 'STR', 128, null, true],
+      /** REPAIR 故障维修 / MAINTAIN 预防保养 / MOLD_CHANGE 换模检修 */
+      ['kind', 'STR', 16, 'REPAIR'],
+      ['fault_desc', 'STR', 500, null, true],
+      ['plan_start_at', 'DT', null, null, true],
+      ['plan_finish_at', 'DT', null, null, true],
+      ['duration_minutes', 'INT', null, 0],
+      /** PLANNED 待安排 / DOING 进行中 / DONE 已完成 / CANCELED 已取消 */
+      ['status', 'STR', 20, 'PLANNED'],
+      ['result_note', 'STR', 500, null, true],
+      ['finished_at', 'DT', null, null, true],
+      ['created_by', 'INT', null, null, true],
+      ['created_by_name', 'STR', 64, null, true],
+      ['updated_at', 'DT'],
+      ['created_at', 'DT'],
+    ],
+    uniques: [['tenant_id', 'code']],
+    indexes: [['tenant_id', 'status'], ['tenant_id', 'target_code']],
   },
 ];
 

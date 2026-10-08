@@ -26,6 +26,7 @@ object Session {
     private const val K_MACHINE = "machine_code"
     private const val K_PHONE = "phone"
     private const val K_MUST_CHANGE = "must_change_password"
+    private const val K_PERMS = "permissions"
 
     private lateinit var prefs: SharedPreferences
 
@@ -71,6 +72,13 @@ object Session {
         get() = prefs.getBoolean(K_MUST_CHANGE, false)
         set(v) = prefs.edit().putBoolean(K_MUST_CHANGE, v).apply()
 
+    /** 服务端下发的权限点，UI 据此决定"能不能提交"，避免无权操作后才发现报错 */
+    var permissions: Set<String>
+        get() = (prefs.getString(K_PERMS, "") ?: "").split(",").filter { it.isNotBlank() }.toSet()
+        set(v) = prefs.edit().putString(K_PERMS, v.joinToString(",")).apply()
+
+    fun can(permission: String): Boolean = permissions.contains(permission)
+
     val isLoggedIn: Boolean get() = !token.isNullOrBlank()
 
     fun saveLogin(data: LoginData) {
@@ -82,6 +90,7 @@ object Session {
         phone = data.user.phone
         tenantCode = data.tenant.code
         mustChangePassword = data.must_change_password
+        permissions = data.user.permissions.toSet()
     }
 
     fun clear() = prefs.edit().clear().apply()

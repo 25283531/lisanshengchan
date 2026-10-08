@@ -3,6 +3,7 @@ package com.molding.mes.data
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -54,6 +55,40 @@ interface ApiService {
 
     @GET("api/orders")
     suspend fun orders(@Query("status") status: String? = null): ApiResp<List<OrderItem>>
+
+    /** 提交新订单（业务员 / 老板 / PMC / 管理员） */
+    @POST("api/orders")
+    suspend fun createOrder(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<OrderCreateResult>
+
+    /** 修改订单（数量 / 交期 / 备注） */
+    @PUT("api/orders/{id}")
+    suspend fun updateOrder(
+        @Path("id") id: Long,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+    ): ApiResp<Map<String, Any?>>
+
+    /* --------------------------- 设备维修保养 --------------------------- */
+
+    @GET("api/maintenance/overview")
+    suspend fun maintenanceOverview(): ApiResp<MaintenanceOverview>
+
+    @GET("api/maintenance/plans")
+    suspend fun maintenancePlans(
+        @Query("status") status: String? = null,
+        @Query("mine") mine: Int? = null,
+    ): ApiResp<List<MaintenancePlan>>
+
+    @POST("api/maintenance/plans")
+    suspend fun createMaintenancePlan(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<Map<String, Any?>>
+
+    @POST("api/maintenance/plans/{id}/status")
+    suspend fun maintenancePlanStatus(
+        @Path("id") id: Long,
+        @Body body: Map<String, @JvmSuppressWildcards Any?>,
+    ): ApiResp<Map<String, Any?>>
+
+    @GET("api/maintenance/devices")
+    suspend fun maintenanceDevices(): ApiResp<DeviceListData>
 
     @POST("api/orders/{id}/outbound")
     suspend fun outbound(

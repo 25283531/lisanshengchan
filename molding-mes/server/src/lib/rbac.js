@@ -66,9 +66,14 @@ const P = {
   'master.write': ['ADMIN', 'TECHNICIAN'],
   'stock.write': ['ADMIN', 'WAREHOUSE'],
   'order.read': RO,
-  'order.create': ['ADMIN', 'SALES'],
-  'order.update': ['ADMIN', 'SALES'],
+  /** 下单/改单：业务员为主，老板与 PMC 也能直接下单（手机上提交新订单） */
+  'order.create': ['ADMIN', 'SALES', 'BOSS', 'PMC'],
+  'order.update': ['ADMIN', 'SALES', 'BOSS', 'PMC'],
+  /** 报工（当班产量）与出库：生产人员与仓库为主 */
   'order.outbound': ['ADMIN', 'WAREHOUSE', 'PRODUCTION'],
+  /** 设备维修/保养计划：技术员提交并推进，管理员兜底 */
+  'maintenance.read': RO,
+  'maintenance.write': ['ADMIN', 'TECHNICIAN'],
   'schedule.read': RO,
   'schedule.run': ['ADMIN', 'PMC', 'TECHNICIAN'],
   'material.read': ['ADMIN', 'BOSS', 'WAREHOUSE', 'MIXER', 'TECHNICIAN', 'PRODUCTION'],

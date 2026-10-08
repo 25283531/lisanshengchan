@@ -11,7 +11,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -37,7 +39,9 @@ import com.molding.mes.data.Session
 import com.molding.mes.ui.AssistantScreen
 import com.molding.mes.ui.HomeScreen
 import com.molding.mes.ui.LoginScreen
+import com.molding.mes.ui.MaintenanceScreen
 import com.molding.mes.ui.MeScreen
+import com.molding.mes.ui.OrdersScreen
 import com.molding.mes.ui.ScheduleScreen
 import com.molding.mes.ui.theme.MoldingMesTheme
 import com.molding.mes.worker.PollWorker
@@ -55,7 +59,18 @@ private enum class Tab(val title: String, val icon: ImageVector?, val iconRes: I
     ASSISTANT("助手", Icons.Filled.PlayArrow, null),
     // Refresh 属于 material-icons-extended，本项目只依赖 core，改用本地矢量图标
     SCHEDULE("排产", null, R.drawable.ic_nav_schedule),
+    ORDERS("订单", Icons.Filled.List, null),
+    MAINTENANCE("设备", Icons.Filled.Build, null),
     ME("我的", Icons.Filled.Person, null),
+}
+
+/**
+ * 底部导航按角色定制中间那个"业务"入口：
+ * 技术员最常去设备页，其余角色最常看订单；两个页面在首页都有入口，不受底部限制。
+ */
+private fun tabsForRole(): List<Tab> {
+    val business = if (Session.role == "TECHNICIAN") Tab.MAINTENANCE else Tab.ORDERS
+    return listOf(Tab.HOME, Tab.ASSISTANT, Tab.SCHEDULE, business, Tab.ME)
 }
 
 @Composable
@@ -89,10 +104,12 @@ private fun MainScaffold(onLogout: () -> Unit) {
         }
     }
 
+    val tabs = remember { tabsForRole() }
+
     Scaffold(
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                Tab.values().forEach { t ->
+                tabs.forEach { t ->
                     NavigationBarItem(
                         selected = tab == t,
                         onClick = { tab = t },
@@ -108,9 +125,15 @@ private fun MainScaffold(onLogout: () -> Unit) {
     ) { padding ->
         androidx.compose.foundation.layout.Column(Modifier.padding(padding)) {
             when (tab) {
-                Tab.HOME -> HomeScreen(onOpenAssistant = { tab = Tab.ASSISTANT })
+                Tab.HOME -> HomeScreen(
+                    onOpenAssistant = { tab = Tab.ASSISTANT },
+                    onOpenOrders = { tab = Tab.ORDERS },
+                    onOpenMaintenance = { tab = Tab.MAINTENANCE },
+                )
                 Tab.ASSISTANT -> AssistantScreen()
                 Tab.SCHEDULE -> ScheduleScreen()
+                Tab.ORDERS -> OrdersScreen()
+                Tab.MAINTENANCE -> MaintenanceScreen()
                 Tab.ME -> MeScreen(onLogout)
             }
         }

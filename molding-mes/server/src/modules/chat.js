@@ -13,6 +13,7 @@ import { materialDemand, labelDemand, checkAvailability } from '../domain/materi
 import { push, decisionZh } from '../domain/notify.js';
 import { runAndPersistSchedule } from './schedule.js';
 import { can } from '../lib/rbac.js';
+import { resolveAiConfig } from '../domain/ai-config.js';
 
 const fmtTime = (s) => (s ? String(s).slice(5, 16) : '-');
 
@@ -27,7 +28,7 @@ export default function registerChatRoutes(app, db, ctx) {
     if (!can(user.role, 'chat.use')) return fail('当前角色无权使用助手', 'FORBIDDEN', 403);
 
     const data = normalizeData(await loadTenantData(db, tid));
-    const aiConfig = await db.get('SELECT * FROM ai_configs WHERE tenant_id = ?', [tid]);
+    const aiConfig = (await resolveAiConfig(db, tid)).config;
 
     const parsed = await parseUtterance(raw, {
       ...data,
@@ -68,7 +69,7 @@ export default function registerChatRoutes(app, db, ctx) {
     const raw = String((req.body || {}).text || '').trim();
     if (!raw) return fail('请输入内容', 'PARAM_MISSING', 400);
     const data = normalizeData(await loadTenantData(db, tid));
-    const aiConfig = await db.get('SELECT * FROM ai_configs WHERE tenant_id = ?', [tid]);
+    const aiConfig = (await resolveAiConfig(db, tid)).config;
     const parsed = await parseUtterance(raw, { ...data, aiConfig, today: toStr(new Date()).slice(0, 10) });
     return ok({
       intent: parsed.intent, payload: parsed.payload, confidence: round(parsed.confidence ?? 0, 2),

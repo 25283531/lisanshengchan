@@ -12,8 +12,8 @@ android {
         applicationId = "com.molding.mes"
         minSdk = 26          // Android 8.0+，覆盖绝大多数工业平板与手机
         targetSdk = 34
-        versionCode = 7
-        versionName = "3.4.0"
+        versionCode = 8
+        versionName = "3.5.0"
 
         // 服务端地址：正式环境 https://zs.250886.xyz/
         // 车间内网调试可在 APP「我的」页临时改成 http://192.168.x.x:8080/（仅保存在本机）

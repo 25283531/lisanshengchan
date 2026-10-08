@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 
 import config from './config.js';
 import { createDb, migrate } from './db/index.js';
+import { ensureGlobalAi } from './domain/ai-config.js';
 import { registerAuth, requireUser, requirePerm, tenantIdOf } from './middleware.js';
 import { ok, fail } from './lib/http.js';
 
@@ -21,17 +22,24 @@ import registerScheduleRoutes from './modules/schedule.js';
 import registerNotifyRoutes from './modules/notify.js';
 import registerChatRoutes from './modules/chat.js';
 import registerMpRoutes from './modules/mp.js';
+import registerIntakeRoutes from './modules/intake.js';
+import registerMaintenanceRoutes from './modules/maintenance.js';
 
 export async function buildServer(opts = {}) {
   const db = opts.db || (await createDb(opts.dbConfig ? { db: opts.dbConfig } : undefined));
-  if (opts.migrate !== false) await migrate(db);
+  if (opts.migrate !== false) {
+    await migrate(db);
+    // 平台 AI 配置始终保证有一行，后台才有的看、有的改
+    await ensureGlobalAi(db);
+  }
 
   const app = Fastify({
     logger: {
       level: config.env === 'production' ? 'warn' : 'info',
       transport: undefined,
     },
-    bodyLimit: 2 * 1024 * 1024,
+    // 基础数据支持上传 Excel 附件，放开到 10MB
+    bodyLimit: 10 * 1024 * 1024,
   });
 
   await app.register(cors, { origin: true, credentials: true });
@@ -75,6 +83,9 @@ export async function buildServer(opts = {}) {
   registerNotifyRoutes(app, db, ctx);
   registerChatRoutes(app, db, ctx);
   registerMpRoutes(app, db, ctx);
+  // 这两个模块内部会注册插件（multipart 等），需要 await
+  await registerIntakeRoutes(app, db, ctx);
+  registerMaintenanceRoutes(app, db, ctx);
 
   app.setNotFoundHandler(async (req, reply) => {
     if (req.url.startsWith('/api')) return reply.code(404).send(fail('接口不存在', 'NOT_FOUND', 404));

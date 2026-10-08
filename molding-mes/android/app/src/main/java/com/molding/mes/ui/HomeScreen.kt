@@ -29,9 +29,16 @@ import com.molding.mes.data.Repo
 import com.molding.mes.data.Session
 import com.molding.mes.data.ShiftItem
 
-/** 首页：按角色展示各自最关心的内容 + 最新消息 */
+/**
+ * 首页：按角色展示各自最关心的内容 + 最新消息。
+ * 所有角色都能从这里进入订单与设备页（提交类操作由服务端权限控制，页面内会自行隐藏）。
+ */
 @Composable
-fun HomeScreen(onOpenAssistant: () -> Unit) {
+fun HomeScreen(
+    onOpenAssistant: () -> Unit,
+    onOpenOrders: () -> Unit = {},
+    onOpenMaintenance: () -> Unit = {},
+) {
     val role = Session.role
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -72,6 +79,23 @@ fun HomeScreen(onOpenAssistant: () -> Unit) {
         if (loading) LoadingBox()
         error?.let { ErrorBox(it) { } }
 
+        // 业务入口：所有角色都能进，页面内按权限显示可提交的操作
+        SectionTitle("我的业务")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            EntryCard(
+                title = "订单",
+                hint = if (Session.can("order.create")) "提交新订单 / 改单" else "查看订单与进度",
+                modifier = Modifier.weight(1f),
+                onClick = onOpenOrders,
+            )
+            EntryCard(
+                title = "设备维护",
+                hint = if (Session.can("maintenance.write")) "提交维修保养计划" else "查看设备与维护状态",
+                modifier = Modifier.weight(1f),
+                onClick = onOpenMaintenance,
+            )
+        }
+
         when (role) {
             "PRODUCTION" -> ShiftBlock(shift)
             "MIXER" -> MaterialBlock(materials)
@@ -91,6 +115,20 @@ fun HomeScreen(onOpenAssistant: () -> Unit) {
         SectionTitle("最新消息", "共 ${notes.size} 条")
         if (notes.isEmpty()) EmptyBox("暂无消息")
         else notes.take(12).forEach { NoteCard(it) }
+    }
+}
+
+/** 业务入口卡片 */
+@Composable
+private fun EntryCard(title: String, hint: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Card(
+        modifier = modifier.clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(hint, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+        }
     }
 }
 

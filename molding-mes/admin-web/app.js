@@ -68,7 +68,11 @@ const NAV = [
   { id: 'chat', name: '助手试跑' },
   { id: 'notifications', name: '消息' },
 ];
-const NAV_PF = [{ id: 'tenants', name: '公司注册与授权' }, { id: 'stats', name: '平台统计' }];
+const NAV_PF = [
+  { id: 'tenants', name: '公司注册与授权' },
+  { id: 'pfai', name: 'AI 接口配置' },
+  { id: 'stats', name: '平台统计' },
+];
 
 function boot() {
   $('#login').classList.add('hidden');
@@ -88,12 +92,13 @@ async function render() {
   const m = $('#main');
   m.innerHTML = '<section><h2>加载中…</h2></section>';
   try {
-    const fn = { overview, employees, wx: wxAccess, master, ai, schedule, orders, chat, notifications, tenants, stats }[state.view];
+    const fn = { overview, employees, wx: wxAccess, master, ai, schedule, orders, chat, notifications, tenants, pfai, stats }[state.view];
     m.innerHTML = await fn();
     if (state.view === 'master') bindMaster();
     if (state.view === 'employees') bindEmployees();
     if (state.view === 'wx') bindWx();
     if (state.view === 'ai') bindAi();
+    if (state.view === 'pfai') bindPfAi();
     if (state.view === 'schedule') bindSchedule();
     if (state.view === 'orders') bindOrders();
     if (state.view === 'chat') bindChat();
@@ -483,6 +488,36 @@ async function master() {
     <h3 style="margin-top:18px">批量导入（JSON 数组）</h3>
     <textarea id="m-bulk" rows="6" placeholder='[{"code":"IM-04","name":"注塑机 4#"}]' style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font:12px ui-monospace,Consolas,monospace"></textarea>
     <div class="row"><button id="m-bulk-go">导入</button><span class="muted">导入前会先清空该类目的现有数据</span></div>
+  </section>
+
+  <section>
+    <header><h2>智能录入（自然语言 / Excel 附件）</h2><span class="spacer"></span>
+      <span class="tag brand">AI 解析 + 人工确认</span></header>
+    <p class="hint">把话直接写进来，或上传 Excel / CSV：系统先解析成表格给你核对，确认后才写入台账。
+      已配置 AI 接口时走 AI 解析，未配置时自动改用确定性解析（按表头与关键词拆分），不会阻塞建档。</p>
+    <div class="row">
+      <label>数据类型<select id="ik-target">${Object.entries(RES_NAMES).map(([k, v]) => `<option value="${k}" ${k === res ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label>上传 Excel / CSV<input id="ik-file" type="file" accept=".xlsx,.csv"></label>
+    </div>
+    <textarea id="ik-text" rows="5" placeholder="例：新增两个产品，MLMJ-01 魔辣面筋（别名麻辣面筋），用 M-01 模具，损耗 3%；再做 MLJG-02 魔辣鸡排"
+      style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px"></textarea>
+    <div class="row">
+      <button id="ik-parse" class="primary" style="width:auto">解析文本</button>
+      <button id="ik-parse-file">解析上传的表格</button>
+      <span id="ik-msg" class="muted"></span>
+    </div>
+    <div id="ik-preview"></div>
+    <div class="row" id="ik-actions" style="display:none">
+      <button id="ik-commit" class="primary" style="width:auto">确认导入</button>
+      <span class="muted">按编码去重：已存在则更新、不存在则新建</span>
+    </div>
+
+    <h3 style="margin-top:18px">自然语言改数</h3>
+    <div class="row">
+      <label style="flex:1">直接说要改什么<input id="ik-mod" placeholder="例：把 魔辣面筋 的 损耗率 改成 4%"></label>
+      <button id="ik-mod-go">解析</button>
+    </div>
+    <div id="ik-mod-preview"></div>
   </section>`;
 }
 function bindMaster() {
@@ -519,49 +554,275 @@ function bindMaster() {
       toast(`已导入 ${r.ids.length} 条`, 'ok'); state.master = null; render();
     } catch (e) { toast(e.message, 'err'); }
   });
+  bindIntake();
+}
+
+/* ------------------------- 基础数据智能录入 ------------------------- */
+/** 收集预览表里的人工修改，避免"改了却没生效" */
+function collectIntakeRows() {
+  if (!state._ik) return;
+  $$('[data-ik]').forEach((el) => {
+    const i = Number(el.dataset.ik);
+    if (state._ik.rows[i]) state._ik.rows[i][el.dataset.f] = el.value;
+  });
+}
+
+function renderIntakePreview(warnings = []) {
+  const box = $('#ik-preview');
+  const ik = state._ik;
+  if (!ik || !ik.rows.length) {
+    box.innerHTML = `<p class="muted">${esc(warnings.join('；') || '没有解析出记录')}</p>`;
+    $('#ik-actions').style.display = 'none';
+    return;
+  }
+  const cols = [...new Set(ik.rows.flatMap((r) => Object.keys(r).filter((k) => k !== '_row')))];
+  const cell = (v, i, c) => {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') return esc(JSON.stringify(v));
+    return `<input data-ik="${i}" data-f="${c}" value="${esc(v)}" style="width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:6px">`;
+  };
+  box.innerHTML = `
+    <table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}<th></th></tr></thead>
+      <tbody>${ik.rows.map((r, i) => `<tr>${cols.map((c) => `<td>${cell(r[c], i, c)}</td>`).join('')}
+        <td><button data-ikrm="${i}">移除</button></td></tr>`).join('')}</tbody></table>
+    ${warnings.length ? `<p class="hint">${warnings.map((w) => esc(w)).join('；')}</p>` : ''}`;
+  $$('[data-ikrm]').forEach((b) => b.addEventListener('click', () => {
+    collectIntakeRows();
+    state._ik.rows.splice(Number(b.dataset.ikrm), 1);
+    renderIntakePreview(warnings);
+  }));
+  $('#ik-actions').style.display = '';
+}
+
+function bindIntake() {
+  $('#ik-parse').addEventListener('click', async () => {
+    const target = $('#ik-target').value;
+    const text = $('#ik-text').value.trim();
+    if (!text) { toast('请输入内容或上传表格', 'err'); return; }
+    $('#ik-msg').textContent = '解析中…';
+    try {
+      const d = await api('POST', '/api/intake/text', { target, text });
+      state._ik = { target, rows: d.rows, draftId: d.draft_id };
+      $('#ik-msg').textContent = d.used_fallback ? '（未使用 AI，走确定性解析）' : '（AI 解析）';
+      renderIntakePreview(d.warnings || []);
+      toast(`已解析出 ${d.rows.length} 条`, 'ok');
+    } catch (e) { $('#ik-msg').textContent = ''; toast(e.message, 'err'); }
+  });
+
+  $('#ik-parse-file').addEventListener('click', async () => {
+    const f = $('#ik-file').files?.[0];
+    if (!f) { toast('请先选择 .xlsx 或 .csv 文件', 'err'); return; }
+    $('#ik-msg').textContent = '上传解析中…';
+    try {
+      const fd = new FormData();
+      fd.append('target', $('#ik-target').value);
+      fd.append('file', f);
+      const res = await fetch('/api/intake/file', {
+        method: 'POST', headers: { Authorization: `Bearer ${state.token}` }, body: fd,
+      });
+      const json = await res.json();
+      if (json.code !== 0) throw new Error(json.message || '解析失败');
+      state._ik = { target: $('#ik-target').value, rows: json.data.rows, draftId: json.data.draft_id };
+      $('#ik-msg').textContent = `${json.data.file_name} · 解析出 ${json.data.rows.length} 条`;
+      renderIntakePreview(json.data.warnings || []);
+      toast('解析完成，请核对', 'ok');
+    } catch (e) { $('#ik-msg').textContent = ''; toast(e.message, 'err'); }
+  });
+
+  $('#ik-commit').addEventListener('click', async () => {
+    if (!state._ik) return;
+    collectIntakeRows();
+    try {
+      const r = await api('POST', '/api/intake/commit', {
+        target: state._ik.target, rows: state._ik.rows, draftId: state._ik.draftId,
+      });
+      toast(`新增 ${r.created} 条、更新 ${r.updated} 条${r.failed.length ? `、失败 ${r.failed.length} 条` : ''}`, 'ok');
+      state._ik = null; state.master = null; render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+
+  $('#ik-mod-go').addEventListener('click', async () => {
+    const text = $('#ik-mod').value.trim();
+    if (!text) { toast('请输入要修改的内容', 'err'); return; }
+    const box = $('#ik-mod-preview');
+    box.innerHTML = '<p class="muted">解析中…</p>';
+    try {
+      const d = await api('POST', '/api/intake/modify', { text });
+      if (!d.ok) { box.innerHTML = `<p class="err">${esc(d.message)}</p>`; return; }
+      state._ikMod = { target: d.target, recordId: d.record_id, patch: Object.fromEntries(d.changes.map((c) => [c.field, c.after])), text };
+      box.innerHTML = `
+        <table><thead><tr><th>字段</th><th>变更前</th><th>变更后</th></tr></thead>
+          <tbody>${d.changes.map((c) => `<tr><td>${esc(c.zh)}</td><td>${esc(JSON.stringify(c.before ?? ''))}</td>
+            <td><b>${esc(JSON.stringify(c.after ?? ''))}</b></td></tr>`).join('')}</tbody></table>
+        <p class="hint">命中${esc(d.target_zh)}「${esc(d.record_name)}」${d.note ? ` · ${esc(d.note)}` : ''}${d.used_fallback ? '（未使用 AI，按句式解析）' : ''}</p>
+        <div class="row"><button id="ik-mod-apply" class="primary" style="width:auto">确认修改</button></div>`;
+      $('#ik-mod-apply').addEventListener('click', async () => {
+        try {
+          await api('POST', '/api/intake/apply', { ...state._ikMod });
+          toast('已更新', 'ok'); state.master = null; render();
+        } catch (e) { toast(e.message, 'err'); }
+      });
+    } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  });
 }
 
 /* ----------------------------- AI 配置 ------------------------------ */
+/**
+ * 配置分两级：平台（系统管理员）统一配置 + 本公司可选覆盖。
+ * 这里把「当前生效的是哪一份」讲清楚，避免管理员误以为改不动或改错了地方。
+ */
 async function ai() {
   const d = await api('GET', '/api/admin/ai-config');
+  const locked = !d.allow_tenant_override;
+  const dis = locked ? 'disabled' : '';
+  const p = d.platform || {};
+  const mine = d.mine || {};
   return `
   <section>
     <header><h2>AI 接口配置</h2><span class="spacer"></span>
-      <span class="tag ${d.api_key_set ? 'ok' : 'warn'}">${d.api_key_set ? '已配置' : '未配置（走确定性兜底解析）'}</span></header>
+      <span class="tag ${d.source === 'tenant' ? 'brand' : (d.source === 'platform' ? 'ok' : 'warn')}">当前生效：${esc(d.source_zh)}</span></header>
+    <p class="hint">${esc(d.explain || '')}</p>
+
+    <div class="cards">
+      <div class="card"><div class="k">生效模型</div><div class="v" style="font-size:16px">${esc(d.model || '')}</div>
+        <div class="muted">${esc(d.base_url || '')}</div></div>
+      <div class="card"><div class="k">API Key</div><div class="v" style="font-size:16px">
+        <span class="tag ${d.api_key_set ? 'ok' : 'warn'}">${d.api_key_set ? esc(d.api_key_mask || '已配置') : '未配置'}</span></div>
+        <div class="muted">${d.api_key_set ? '已保存，页面不再回显明文' : esc(d.fallback_note || '')}</div></div>
+      <div class="card"><div class="k">最近一次测试</div><div class="v" style="font-size:14px">
+        <span class="tag ${d.last_test_ok ? 'ok' : 'warn'}">${d.last_test_ok ? '正常' : '未通过'}</span></div>
+        <div class="muted">${esc(d.last_test_msg || '尚未测试')}</div></div>
+    </div>
+  </section>
+
+  <section><header><h2>平台统一配置（只读）</h2></header>
+    <p class="hint">由系统管理员在平台后台维护，全平台共用。本公司未填写自定义配置时，自动使用这一份。</p>
     <div class="row">
-      <label>服务地址 BaseURL<input id="ai-url" value="${esc(d.base_url)}"></label>
-      <label>模型 Model<input id="ai-model" value="${esc(d.model)}"></label>
-      <label>温度 Temperature<input id="ai-temp" type="number" step="0.1" value="${d.temperature}"></label>
-      <label>超时(ms)<input id="ai-timeout" type="number" value="${d.timeout_ms}"></label>
+      <label>服务地址 BaseURL<input value="${esc(p.base_url || '')}" disabled></label>
+      <label>模型 Model<input value="${esc(p.model || '')}" disabled></label>
+      <label>温度 Temperature<input value="${p.temperature ?? ''}" disabled></label>
+      <label>超时(ms)<input value="${p.timeout_ms ?? ''}" disabled></label>
     </div>
     <div class="row">
-      <label>API Key<input id="ai-key" type="password" placeholder="${d.api_key_set ? '已保存，留空表示不修改' : 'sk-...'}"></label>
-      <label>启用 AI<select id="ai-enabled"><option value="1" ${d.enabled ? 'selected' : ''}>启用</option><option value="0" ${!d.enabled ? 'selected' : ''}>停用</option></select></label>
-      <label>失败时走兜底解析<select id="ai-fb"><option value="1" ${d.allow_fallback ? 'selected' : ''}>允许</option><option value="0" ${!d.allow_fallback ? 'selected' : ''}>不允许</option></select></label>
+      <label>API Key<input value="${esc(p.api_key_set ? (p.api_key_mask || '已配置') : '未配置')}" disabled></label>
+      <label>启用 AI<input value="${p.enabled ? '启用' : '停用'}" disabled></label>
+      <label>失败兜底<input value="${p.allow_fallback ? '允许' : '不允许'}" disabled></label>
     </div>
-    <div class="row"><button id="ai-save" class="primary" style="width:auto">保存</button>
-      <button id="ai-test">测试连通性</button><span id="ai-msg" class="muted"></span></div>
+  </section>
+
+  <section>
+    <header><h2>本公司自定义配置</h2><span class="spacer"></span>
+      <span class="tag ${locked ? 'warn' : 'brand'}">${locked ? '系统管理员已锁定，不可修改' : '可覆盖（只对本公司生效）'}</span></header>
+    <p class="hint">${locked
+      ? '平台已锁定 AI 接口配置，所有公司统一使用平台配置。如需单独接入，请联系系统管理员放开「允许公司自定义」。'
+      : '留空并使用平台配置的字段：模型、地址、温度、超时保持空白即继承平台值；填写 API Key 后，本公司立即改用自己这套接口，其他公司不受影响。'}</p>
+    <div class="row">
+      <label>服务地址 BaseURL<input id="ai-url" ${dis} placeholder="留空继承平台配置" value="${esc(mine.api_key_set ? (mine.base_url || '') : '')}"></label>
+      <label>模型 Model<input id="ai-model" ${dis} placeholder="留空继承平台配置" value="${esc(mine.api_key_set ? (mine.model || '') : '')}"></label>
+      <label>温度 Temperature<input id="ai-temp" ${dis} type="number" step="0.1" value="${mine.temperature ?? ''}"></label>
+      <label>超时(ms)<input id="ai-timeout" ${dis} type="number" value="${mine.timeout_ms ?? ''}"></label>
+    </div>
+    <div class="row">
+      <label>API Key<input id="ai-key" ${dis} type="password" placeholder="${mine.api_key_set ? '已保存，留空表示不修改' : 'sk-...（留空则使用平台配置）'}"></label>
+      <label>启用 AI<select id="ai-enabled" ${dis}><option value="1" ${mine.enabled !== false ? 'selected' : ''}>启用</option><option value="0" ${mine.enabled === false ? 'selected' : ''}>停用</option></select></label>
+      <label>失败时走兜底解析<select id="ai-fb" ${dis}><option value="1" ${mine.allow_fallback !== false ? 'selected' : ''}>允许</option><option value="0" ${mine.allow_fallback === false ? 'selected' : ''}>不允许</option></select></label>
+    </div>
+    <div class="row">
+      <button id="ai-save" class="primary" style="width:auto" ${dis}>保存本公司配置</button>
+      <button id="ai-test">测试当前生效配置</button>
+      <button id="ai-reset" ${dis}>恢复平台统一配置</button>
+      <span id="ai-msg" class="muted"></span>
+    </div>
     <p class="hint">支持任何 OpenAI 兼容协议的服务：DeepSeek、通义千问、智谱、本地 vLLM / Ollama 等。
       未配置 Key 时，系统使用内置确定性解析器（关键词 + 中文数量/日期解析 + 词典匹配），无需联网也能完成下单与出库。</p>
   </section>`;
 }
 function bindAi() {
-  $('#ai-save').addEventListener('click', async () => {
+  const save = $('#ai-save');
+  if (save) save.addEventListener('click', async () => {
     try {
       await api('PUT', '/api/admin/ai-config', {
-        baseUrl: $('#ai-url').value, model: $('#ai-model').value,
-        temperature: Number($('#ai-temp').value), timeoutMs: Number($('#ai-timeout').value),
+        baseUrl: $('#ai-url').value || undefined, model: $('#ai-model').value || undefined,
+        temperature: $('#ai-temp').value === '' ? undefined : Number($('#ai-temp').value),
+        timeoutMs: $('#ai-timeout').value === '' ? undefined : Number($('#ai-timeout').value),
         apiKey: $('#ai-key').value || undefined,
         enabled: $('#ai-enabled').value === '1', allowFallback: $('#ai-fb').value === '1',
       });
-      toast('已保存', 'ok'); render();
+      toast('本公司配置已保存', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   });
-  $('#ai-test').addEventListener('click', async () => {
+  const test = $('#ai-test');
+  if (test) test.addEventListener('click', async () => {
     $('#ai-msg').textContent = '测试中…';
-    const r = await api('POST', '/api/admin/ai-config/test');
-    $('#ai-msg').textContent = r.message;
-    toast(r.ok ? '连通正常' : '连接失败', r.ok ? 'ok' : 'err');
+    try {
+      const r = await api('POST', '/api/admin/ai-config/test');
+      $('#ai-msg').textContent = r.message;
+      toast(r.ok ? '连通正常' : '连接失败', r.ok ? 'ok' : 'err');
+    } catch (e) { $('#ai-msg').textContent = e.message; toast(e.message, 'err'); }
+  });
+  const reset = $('#ai-reset');
+  if (reset) reset.addEventListener('click', async () => {
+    try {
+      await api('DELETE', '/api/admin/ai-config');
+      toast('已恢复使用平台统一配置', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+}
+
+/* ------------------------- 平台 AI 配置（系统管理员） ------------------------- */
+async function pfai() {
+  const d = await api('GET', '/api/platform/ai-config');
+  const ov = d.tenant_overrides || [];
+  return `
+  <section>
+    <header><h2>AI 接口配置（平台统一）</h2><span class="spacer"></span>
+      <span class="tag ${d.source === 'platform' ? 'ok' : 'warn'}">${d.source === 'platform' ? '已落库' : '当前来自服务器环境变量'}</span></header>
+    <p class="hint">这里的配置是全平台默认值：任何公司只要没有自己填 API Key，就使用这一套接口。
+      勾掉「允许公司自定义」后，所有公司强制统一，公司后台将只能查看、不能修改。</p>
+    <div class="row">
+      <label>服务地址 BaseURL<input id="pfai-url" value="${esc(d.base_url || '')}"></label>
+      <label>模型 Model<input id="pfai-model" value="${esc(d.model || '')}"></label>
+      <label>温度 Temperature<input id="pfai-temp" type="number" step="0.1" value="${d.temperature ?? 0.1}"></label>
+      <label>超时(ms)<input id="pfai-timeout" type="number" value="${d.timeout_ms ?? 20000}"></label>
+    </div>
+    <div class="row">
+      <label>API Key<input id="pfai-key" type="password" placeholder="${d.api_key_set ? esc(d.api_key_mask || '已配置') + '，留空表示不修改' : 'sk-...'}"></label>
+      <label>启用 AI<select id="pfai-enabled"><option value="1" ${d.enabled ? 'selected' : ''}>启用</option><option value="0" ${!d.enabled ? 'selected' : ''}>停用</option></select></label>
+      <label>失败时走兜底解析<select id="pfai-fb"><option value="1" ${d.allow_fallback ? 'selected' : ''}>允许</option><option value="0" ${!d.allow_fallback ? 'selected' : ''}>不允许</option></select></label>
+      <label>允许公司自定义<select id="pfai-override"><option value="1" ${d.allow_tenant_override ? 'selected' : ''}>允许</option><option value="0" ${!d.allow_tenant_override ? 'selected' : ''}>锁定（强制统一）</option></select></label>
+    </div>
+    <div class="row"><button id="pfai-save" class="primary" style="width:auto">保存</button>
+      <button id="pfai-test">测试连通性</button><span id="pfai-msg" class="muted"></span></div>
+    <p class="hint">最近一次测试：${d.last_test_ok ? '✅' : '⚠️'} ${esc(d.last_test_msg || '尚未测试')}${d.updated_at ? `（${esc(d.updated_at)}）` : ''}</p>
+  </section>
+
+  <section><header><h2>已自定义 AI 接口的公司</h2></header>
+    <table><thead><tr><th>公司</th><th>编码</th><th>模型</th><th>服务地址</th><th>状态</th></tr></thead>
+      <tbody>${ov.map((t) => `<tr><td>${esc(t.name)}</td><td>${esc(t.code)}</td><td>${esc(t.model || '')}</td>
+        <td>${esc(t.base_url || '')}</td><td><span class="tag ${t.enabled ? 'brand' : 'warn'}">${t.enabled ? '启用' : '停用'}</span></td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">暂无公司自定义配置，全部使用平台统一配置</td></tr>'}</tbody></table>
+  </section>`;
+}
+function bindPfAi() {
+  $('#pfai-save').addEventListener('click', async () => {
+    try {
+      await api('PUT', '/api/platform/ai-config', {
+        baseUrl: $('#pfai-url').value, model: $('#pfai-model').value,
+        temperature: Number($('#pfai-temp').value), timeoutMs: Number($('#pfai-timeout').value),
+        apiKey: $('#pfai-key').value || undefined,
+        enabled: $('#pfai-enabled').value === '1', allowFallback: $('#pfai-fb').value === '1',
+        allowTenantOverride: $('#pfai-override').value === '1',
+      });
+      toast('平台 AI 配置已保存', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $('#pfai-test').addEventListener('click', async () => {
+    $('#pfai-msg').textContent = '测试中…';
+    try {
+      const r = await api('POST', '/api/platform/ai-config/test');
+      $('#pfai-msg').textContent = r.message;
+      toast(r.ok ? '连通正常' : '连接失败', r.ok ? 'ok' : 'err');
+    } catch (e) { $('#pfai-msg').textContent = e.message; toast(e.message, 'err'); }
   });
 }
 

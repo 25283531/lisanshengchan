@@ -143,6 +143,71 @@ data class OrderItem(
     val status: String? = null,
 )
 
+/** 新建订单的返回：只回 id 与单号 */
+data class OrderCreateResult(val id: Long = 0, val code: String = "")
+
+/* ------------------------------ 设备维修保养 ---------------------------- */
+
+data class DeviceItem(
+    val code: String = "",
+    val name: String? = null,
+    val status: String? = null,
+    val current_mold_code: String? = null,
+)
+
+data class MoldDueItem(
+    val code: String = "",
+    val name: String? = null,
+    val cumulative_shots: Int = 0,
+    val maintenance_at_shots: Int = 0,
+    val remaining_shots: Int = 0,
+    val overdue: Boolean = false,
+)
+
+data class MaintenanceCounts(
+    val planned: Int = 0,
+    val doing: Int = 0,
+    val machine_fault: Int = 0,
+    val mold_maintenance: Int = 0,
+)
+
+data class MaintenancePlan(
+    val id: Long = 0,
+    val code: String = "",
+    val target_type: String = "MACHINE",
+    val target_type_zh: String? = null,
+    val target_code: String = "",
+    val target_name: String? = null,
+    val kind: String = "REPAIR",
+    val kind_zh: String? = null,
+    val fault_desc: String? = null,
+    val plan_start_at: String? = null,
+    val plan_finish_at: String? = null,
+    val duration_minutes: Int = 0,
+    val status: String = "PLANNED",
+    val status_zh: String? = null,
+    val result_note: String? = null,
+    val finished_at: String? = null,
+    val created_by_name: String? = null,
+    val created_at: String? = null,
+)
+
+data class MaintenanceOverview(
+    val machines: List<DeviceItem> = emptyList(),
+    val molds: List<DeviceItem> = emptyList(),
+    val mold_due: List<MoldDueItem> = emptyList(),
+    val plans: List<MaintenancePlan> = emptyList(),
+    val counts: MaintenanceCounts = MaintenanceCounts(),
+    val open_count: Int = 0,
+)
+
+data class DeviceOption(val code: String = "", val name: String? = null, val status: String? = null)
+
+data class DeviceListData(
+    val machines: List<DeviceOption> = emptyList(),
+    val molds: List<DeviceOption> = emptyList(),
+)
+
 /* ------------------------------ 自然语言 ------------------------------- */
 
 data class ChatResult(

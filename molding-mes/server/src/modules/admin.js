@@ -11,6 +11,7 @@ import { audit } from '../lib/repo.js';
 import { checkSeat, requirePerm } from '../middleware.js';
 import { ALL_ROLES, ROLES, roleZh } from '../lib/rbac.js';
 import { onboardingReport } from './master.js';
+import { resolveAiConfig, readGlobalAi, publicView, testAiConnection } from '../domain/ai-config.js';
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
@@ -29,7 +30,7 @@ export default function registerAdminRoutes(app, db, ctx) {
       counts[t] = Number(r?.c || 0);
     }
     const orders = await db.get("SELECT COUNT(*) AS c FROM orders WHERE tenant_id = ? AND status <> 'COMPLETED'", [tid]);
-    const ai = await db.get('SELECT * FROM ai_configs WHERE tenant_id = ?', [tid]);
+    const aiEff = await resolveAiConfig(db, tid);
     const onboarding = await onboardingReport(db, tid);
     return ok({
       tenant: {
@@ -39,13 +40,11 @@ export default function registerAdminRoutes(app, db, ctx) {
       },
       master_counts: counts,
       open_orders: Number(orders?.c || 0),
-      ai: ai ? {
-        provider: ai.provider, base_url: ai.base_url, model: ai.model,
-        temperature: num(ai.temperature, 0.1), enabled: !!ai.enabled,
-        allow_fallback: !!ai.allow_fallback,
-        api_key_set: !!ai.api_key, api_key_mask: ai.api_key ? maskKey(ai.api_key) : null,
-        last_test_ok: !!ai.last_test_ok, last_test_msg: ai.last_test_msg,
-      } : null,
+      ai: {
+        ...publicView(aiEff.config),
+        source: aiEff.source, source_zh: aiEff.source_zh,
+        allow_tenant_override: aiEff.allow_tenant_override,
+      },
       onboarding,
     });
   }));
@@ -199,26 +198,46 @@ export default function registerAdminRoutes(app, db, ctx) {
   }));
 
   /* ------------------------------ AI 配置 ------------------------------ */
+  /**
+   * 层级说明：AI 接口由系统管理员在平台后台统一配置；
+   * 平台放开覆盖开关时，各公司可在本页填写自己的 Key（只影响本公司）。
+   */
   const readAi = async (tid) => (await db.get('SELECT * FROM ai_configs WHERE tenant_id = ?', [tid])) || null;
 
   app.get('/api/admin/ai-config', wrap(async (req) => {
     const user = adminOnly(req);
-    const ai = await readAi(user.tenant_id);
-    if (!ai) return fail('尚未初始化 AI 配置', 'NOT_FOUND', 404);
+    const tid = user.tenant_id;
+    const eff = await resolveAiConfig(db, tid);
+    const mine = await readAi(tid);
+    const g = await readGlobalAi(db);
     return ok({
-      provider: ai.provider, base_url: ai.base_url, model: ai.model,
-      temperature: num(ai.temperature, 0.1), timeout_ms: ai.timeout_ms,
-      enabled: !!ai.enabled, allow_fallback: !!ai.allow_fallback,
-      api_key_set: !!ai.api_key, api_key_mask: ai.api_key ? maskKey(ai.api_key) : null,
-      last_test_ok: !!ai.last_test_ok, last_test_msg: ai.last_test_msg,
-      /** 未配置 Key 时是否仍能解析（确定性兜底） */
-      fallback_note: ai.api_key ? null : '未配置 API Key，自然语言将走确定性兜底解析器（无需联网）',
+      /** 当前实际生效的配置（脱敏） */
+      ...publicView(eff.config),
+      source: eff.source,
+      source_zh: eff.source_zh,
+      /** 平台配置（脱敏，公司只能看） */
+      platform: publicView(g) || publicView(null),
+      /** 本公司自己填的那份（可能为空 = 用平台配置） */
+      mine: publicView(mine),
+      allow_tenant_override: eff.allow_tenant_override,
+      tenant_override: eff.tenant_override,
+      last_test_ok: mine ? !!num(mine.last_test_ok, 0) : (g ? !!num(g.last_test_ok, 0) : false),
+      last_test_msg: (eff.source === 'tenant' ? mine?.last_test_msg : g?.last_test_msg) || null,
+      fallback_note: eff.config.api_key ? null : '未配置 API Key，自然语言将走确定性兜底解析器（无需联网）',
+      /** 界面上直接展示的文字说明，避免管理员误解配置归属 */
+      explain: eff.allow_tenant_override
+        ? 'AI 接口由系统管理员在平台后台统一配置；本公司留空即使用平台配置，填写则只在本公司生效。'
+        : '系统管理员已锁定 AI 接口配置，全平台统一生效；本公司不可修改。',
     });
   }));
 
   app.put('/api/admin/ai-config', wrap(async (req) => {
     const user = adminOnly(req);
     const b = req.body || {};
+    const g = await readGlobalAi(db);
+    if (g && !num(g.allow_tenant_override, 1)) {
+      return fail('系统管理员已锁定 AI 接口配置，公司不可修改', 'AI_LOCKED_BY_PLATFORM', 403);
+    }
     const patch = { updated_at: nowStr() };
     if (b.provider !== undefined) patch.provider = String(b.provider);
     if (b.baseUrl !== undefined) patch.base_url = String(b.baseUrl);
@@ -228,55 +247,51 @@ export default function registerAdminRoutes(app, db, ctx) {
     if (b.timeoutMs !== undefined) patch.timeout_ms = Number(b.timeoutMs);
     if (b.enabled !== undefined) patch.enabled = b.enabled ? 1 : 0;
     if (b.allowFallback !== undefined) patch.allow_fallback = b.allow_fallback ? 1 : 0;
+    /** 填了 Key 就是要用它：未显式指定启用开关时自动启用，避免"配了却没生效" */
+    if (b.apiKey && b.enabled === undefined) patch.enabled = 1;
     const keys = Object.keys(patch);
-    await db.run(`UPDATE ai_configs SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE tenant_id = ?`,
+    const n = await db.run(`UPDATE ai_configs SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE tenant_id = ?`,
       [...keys.map((k) => patch[k]), user.tenant_id]);
+    if (!n.changes) {
+      // 公司建租户时就有一条记录，理论上不会走到这里；兜底补一条
+      await db.run(
+        `INSERT INTO ai_configs (tenant_id, provider, base_url, api_key, model, temperature, timeout_ms, enabled, allow_fallback, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [user.tenant_id, patch.provider || 'OPENAI_COMPAT', patch.base_url || 'https://api.deepseek.com/v1',
+          patch.api_key ?? null, patch.model || 'deepseek-chat', patch.temperature ?? 0.1,
+          patch.timeout_ms ?? 20000, patch.enabled ?? 1, patch.allow_fallback ?? 1, nowStr()],
+      );
+    }
     await audit(db, { tenantId: user.tenant_id, userId: user.id, action: 'ai_config.update', detail: { ...b, apiKey: b.apiKey ? '***' : null } });
-    return ok(null, 'AI 配置已保存');
+    return ok(null, '本公司 AI 配置已保存');
   }));
 
-  /** 联通性测试：真发一条最小请求 */
+  /** 放弃本公司自定义，回落平台统一配置 */
+  app.delete('/api/admin/ai-config', wrap(async (req) => {
+    const user = adminOnly(req);
+    const g = await readGlobalAi(db);
+    if (g && !num(g.allow_tenant_override, 1)) {
+      return fail('系统管理员已锁定 AI 接口配置，公司不可修改', 'AI_LOCKED_BY_PLATFORM', 403);
+    }
+    await db.run('UPDATE ai_configs SET api_key = NULL, enabled = 0, updated_at = ? WHERE tenant_id = ?',
+      [nowStr(), user.tenant_id]);
+    await audit(db, { tenantId: user.tenant_id, userId: user.id, action: 'ai_config.reset' });
+    return ok(null, '已恢复使用平台统一配置');
+  }));
+
+  /** 联通性测试：按当前生效配置真发一条最小请求 */
   app.post('/api/admin/ai-config/test', wrap(async (req) => {
     const user = adminOnly(req);
-    const ai = await readAi(user.tenant_id);
-    if (!ai) return fail('尚未初始化 AI 配置', 'NOT_FOUND', 404);
-    if (!ai.api_key) {
-      await db.run('UPDATE ai_configs SET last_test_ok = 0, last_test_msg = ?, updated_at = ? WHERE tenant_id = ?',
-        ['未配置 API Key，当前使用确定性兜底解析器', nowStr(), user.tenant_id]);
-      return ok({ ok: false, message: '未配置 API Key，当前使用确定性兜底解析器', mode: 'fallback' });
+    const eff = await resolveAiConfig(db, user.tenant_id);
+    if (eff.source !== 'tenant') {
+      // 生效的是平台配置：测试结果不写公司记录（公司无权改平台配置）
+      return ok(await testAiConnection(eff.config));
     }
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), num(ai.timeout_ms, 20000));
-    const t0 = Date.now();
-    try {
-      const res = await fetch(`${String(ai.base_url).replace(/\/+$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.api_key}` },
-        body: JSON.stringify({
-          model: ai.model, temperature: 0,
-          messages: [
-            { role: 'system', content: '你是一个连通性测试助手。' },
-            { role: 'user', content: '输出 JSON：{"ok":true}' },
-          ],
-        }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 160)}`);
-      const j = await res.json();
-      const content = j?.choices?.[0]?.message?.content || '';
-      const ms = Date.now() - t0;
-      const msg = `连通正常，耗时 ${ms}ms，模型 ${ai.model}`;
-      await db.run('UPDATE ai_configs SET last_test_ok = 1, last_test_msg = ?, updated_at = ? WHERE tenant_id = ?',
-        [msg, nowStr(), user.tenant_id]);
-      return ok({ ok: true, message: msg, sample: String(content).slice(0, 120) });
-    } catch (e) {
-      clearTimeout(timer);
-      const msg = `连接失败：${e.message}`.slice(0, 250);
-      await db.run('UPDATE ai_configs SET last_test_ok = 0, last_test_msg = ?, updated_at = ? WHERE tenant_id = ?',
-        [msg, nowStr(), user.tenant_id]);
-      return ok({ ok: false, message: msg, mode: 'ai' });
-    }
+    const r = await testAiConnection(eff.config, async (okFlag, msg) => {
+      await db.run('UPDATE ai_configs SET last_test_ok = ?, last_test_msg = ?, updated_at = ? WHERE tenant_id = ?',
+        [okFlag ? 1 : 0, msg, nowStr(), user.tenant_id]);
+    });
+    return ok(r);
   }));
 
   /* ------------------------------ 角色字典 ---------------------------- */
@@ -311,10 +326,4 @@ function resolveInitialPassword(b) {
 /** 6 位数字初始密码（便于电话/口头告知，员工首次登录后可自行改） */
 function randomPassword() {
   return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-function maskKey(k) {
-  const s = String(k);
-  if (s.length <= 8) return '****';
-  return `${s.slice(0, 4)}****${s.slice(-4)}`;
 }
