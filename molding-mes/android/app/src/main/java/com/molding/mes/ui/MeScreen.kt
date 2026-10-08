@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -32,6 +33,9 @@ import kotlinx.coroutines.launch
 fun MeScreen(onLogout: () -> Unit) {
     var baseUrl by remember { mutableStateOf(Session.baseUrl) }
     var saved by remember { mutableStateOf<String?>(null) }
+    // LocalContext.current 是 @Composable 调用，只能在组合期取值，
+    // 不能在 onClick 这类非 @Composable lambda 里直接调
+    val ctx = LocalContext.current
 
     Column(
         Modifier
@@ -116,10 +120,10 @@ fun MeScreen(onLogout: () -> Unit) {
 
         SectionTitle("消息推送")
         Text("后台每 15 分钟轮询一次新消息并弹出通知。", fontSize = 12.sp)
-        Button(onClick = { PollWorker.enable(androidx.compose.ui.platform.LocalContext.current) }, Modifier.fillMaxWidth()) {
+        Button(onClick = { PollWorker.enable(ctx) }, Modifier.fillMaxWidth()) {
             Text("开启轮询")
         }
-        Button(onClick = { PollWorker.disable(androidx.compose.ui.platform.LocalContext.current) }, Modifier.fillMaxWidth()) {
+        Button(onClick = { PollWorker.disable(ctx) }, Modifier.fillMaxWidth()) {
             Text("关闭轮询")
         }
 

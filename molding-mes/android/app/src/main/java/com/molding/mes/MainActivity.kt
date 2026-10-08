@@ -28,9 +28,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.molding.mes.R
 import com.molding.mes.data.Session
 import com.molding.mes.ui.AssistantScreen
 import com.molding.mes.ui.HomeScreen
@@ -48,11 +50,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Tab(val title: String, val icon: ImageVector) {
-    HOME("首页", Icons.Filled.Home),
-    ASSISTANT("助手", Icons.Filled.PlayArrow),
-    SCHEDULE("排产", Icons.Filled.Refresh),
-    ME("我的", Icons.Filled.Person),
+private enum class Tab(val title: String, val icon: ImageVector?, val iconRes: Int?) {
+    HOME("首页", Icons.Filled.Home, null),
+    ASSISTANT("助手", Icons.Filled.PlayArrow, null),
+    // Refresh 属于 material-icons-extended，本项目只依赖 core，改用本地矢量图标
+    SCHEDULE("排产", null, R.drawable.ic_nav_schedule),
+    ME("我的", Icons.Filled.Person, null),
 }
 
 @Composable
@@ -93,7 +96,10 @@ private fun MainScaffold(onLogout: () -> Unit) {
                     NavigationBarItem(
                         selected = tab == t,
                         onClick = { tab = t },
-                        icon = { Icon(t.icon, contentDescription = t.title) },
+                        icon = {
+                            if (t.icon != null) Icon(t.icon!!, contentDescription = t.title)
+                            else Icon(painterResource(t.iconRes!!), contentDescription = t.title)
+                        },
                         label = { Text(t.title) },
                     )
                 }
