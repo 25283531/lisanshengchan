@@ -44,6 +44,19 @@ export async function buildServer(opts = {}) {
 
   await app.register(cors, { origin: true, credentials: true });
 
+  // 容错：许多客户端（curl、脚本、第三方集成）发 POST 时会固定带 Content-Type: application/json
+  // 却没有请求体，Fastify 默认直接拒绝（FST_ERR_CTP_EMPTY_JSON_BODY）。这里把空体当作 {} 放行。
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    if (body === undefined || body === null || String(body).trim() === '') return done(null, {});
+    try {
+      done(null, JSON.parse(body));
+    } catch (e) {
+      e.statusCode = 400;
+      e.code = 'FST_ERR_CTP_INVALID_MEDIA_TYPE';
+      done(e, undefined);
+    }
+  });
+
   const ctx = { config, db, requireUser, requirePerm, tenantIdOf };
 
   registerAuth(app, db);

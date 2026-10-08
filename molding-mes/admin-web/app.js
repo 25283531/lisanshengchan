@@ -9,9 +9,13 @@ const state = { token: null, user: null, tenant: null, platform: false, view: 'o
 
 /* ------------------------------- 接口 ------------------------------- */
 async function api(method, url, body) {
-  const headers = { 'Content-Type': 'application/json' };
+  // 注意：没有 body 时千万不能带 Content-Type: application/json，
+  // 否则 Fastify 会拒绝请求：Body cannot be empty when content-type is set to 'application/json'
+  const hasBody = body !== undefined && body !== null;
+  const headers = {};
+  if (hasBody) headers['Content-Type'] = 'application/json';
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(url, { method, headers, body: hasBody ? JSON.stringify(body) : undefined });
   const json = await res.json().catch(() => ({ code: 'ERROR', message: '响应解析失败' }));
   if (json.code !== 0) {
     if (json.code === 'MULTI_TENANT') { const e = new Error(json.message); e.extra = json.data; throw e; }
