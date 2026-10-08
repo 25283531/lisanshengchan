@@ -107,39 +107,13 @@ export default function registerMaintenanceRoutes(app, db, ctx) {
   /** 提交维修/保养计划 */
   app.post('/api/maintenance/plans', wrap(async (req) => {
     const user = requirePerm(req, 'maintenance.write');
-    const tid = user.tenant_id;
     const b = req.body || {};
-    const targetType = String(b.targetType || 'MACHINE').toUpperCase();
-    const targetCode = String(b.targetCode || '').trim();
-    const kind = String(b.kind || 'REPAIR').toUpperCase();
-    if (!TYPES.includes(targetType)) return fail('设备类型只能是 MACHINE / MOLD', 'BAD_TYPE', 400);
-    if (!KINDS.includes(kind)) return fail(`计划类型只能是 ${KINDS.join(' / ')}`, 'BAD_KIND', 400);
-    if (!targetCode) return fail('设备编号不能为空', 'PARAM_MISSING', 400);
-
-    const device = await findDevice(db, tid, targetType, targetCode);
-    if (!device) return fail(`${TYPE_ZH[targetType]} ${targetCode} 不存在，请先在基础数据里建档`, 'DEVICE_NOT_FOUND', 404);
-
-    const code = await genCode(db, tid);
-    const id = await db.run(
-      `INSERT INTO maintenance_plans (\`tenant_id\`, \`code\`, \`target_type\`, \`target_code\`, \`target_name\`, \`kind\`, \`fault_desc\`,
-        \`plan_start_at\`, \`plan_finish_at\`, \`duration_minutes\`, \`status\`, \`created_by\`, \`created_by_name\`, \`created_at\`, \`updated_at\`)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [tid, code, targetType, targetCode, device.name || targetCode, kind, b.faultDesc || null,
-        b.planStartAt || null, b.planFinishAt || null, num(b.durationMinutes, 0),
-        'PLANNED', user.id, user.name || null, nowStr(), nowStr()],
-    );
-    await audit(db, { tenantId: tid, userId: user.id, action: 'maintenance.plan.create', detail: { code, targetCode, kind } });
-
-    await push(db, {
-      tenantId: tid, type: targetType === 'MOLD' ? 'MOLD_MAINTENANCE' : 'MACHINE_FAULT',
-      title: `${KIND_ZH[kind]}计划 · ${targetCode}`,
-      body: `${user.name || '技术员'}提交了${TYPE_ZH[targetType]} ${targetCode} 的${KIND_ZH[kind]}计划${b.faultDesc ? `：${b.faultDesc}` : ''}。计划时长 ${num(b.durationMinutes, 0)} 分钟。`,
-      payload: { plan_id: Number(id.insertId), plan_code: code, target_type: targetType, target_code: targetCode, kind },
-      audienceRoles: ['ADMIN', 'PMC', 'PRODUCTION', 'TECHNICIAN'],
-      refType: 'MAINTENANCE', refId: Number(id.insertId), level: 'WARN',
+    const r = await createPlan(db, user, {
+      targetType: b.targetType, targetCode: b.targetCode, kind: b.kind,
+      faultDesc: b.faultDesc, planStartAt: b.planStartAt, planFinishAt: b.planFinishAt,
+      durationMinutes: b.durationMinutes,
     });
-
-    return ok({ id: Number(id.insertId), code }, `${KIND_ZH[kind]}计划 ${code} 已提交`);
+    return ok({ id: r.id, code: r.code }, r.message);
   }));
 
   /** 修改计划内容（仅待安排/进行中可改） */
@@ -236,6 +210,48 @@ export default function registerMaintenanceRoutes(app, db, ctx) {
 }
 
 /* ------------------------------- 内部函数 ------------------------------ */
+
+/**
+ * 创建维修/保养计划（路由与自然语言助手共用）。
+ * 参数不合法时抛 AppError，调用方直接透传即可。
+ */
+export async function createPlan(db, user, b) {
+  const tid = user.tenant_id;
+  const targetType = String(b.targetType || 'MACHINE').toUpperCase();
+  const targetCode = String(b.targetCode || '').trim();
+  const kind = String(b.kind || 'REPAIR').toUpperCase();
+  if (!TYPES.includes(targetType)) throw new AppError('设备类型只能是 MACHINE / MOLD', 400, 'BAD_TYPE');
+  if (!KINDS.includes(kind)) throw new AppError(`计划类型只能是 ${KINDS.join(' / ')}`, 400, 'BAD_KIND');
+  if (!targetCode) throw new AppError('设备编号不能为空', 400, 'PARAM_MISSING');
+
+  const device = await findDevice(db, tid, targetType, targetCode);
+  if (!device) {
+    throw new AppError(`${TYPE_ZH[targetType]} ${targetCode} 不存在，请先在基础数据里建档`, 404, 'DEVICE_NOT_FOUND');
+  }
+
+  const code = await genCode(db, tid);
+  const id = await db.run(
+    `INSERT INTO maintenance_plans (\`tenant_id\`, \`code\`, \`target_type\`, \`target_code\`, \`target_name\`, \`kind\`, \`fault_desc\`,
+      \`plan_start_at\`, \`plan_finish_at\`, \`duration_minutes\`, \`status\`, \`created_by\`, \`created_by_name\`, \`created_at\`, \`updated_at\`)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [tid, code, targetType, targetCode, device.name || targetCode, kind, b.faultDesc || null,
+      b.planStartAt || null, b.planFinishAt || null, num(b.durationMinutes, 0),
+      'PLANNED', user.id, user.name || null, nowStr(), nowStr()],
+  );
+  const planId = Number(id.insertId);
+  await audit(db, { tenantId: tid, userId: user.id, action: 'maintenance.plan.create', detail: { code, targetCode, kind } });
+
+  await push(db, {
+    tenantId: tid, type: targetType === 'MOLD' ? 'MOLD_MAINTENANCE' : 'MACHINE_FAULT',
+    title: `${KIND_ZH[kind]}计划 · ${targetCode}`,
+    body: `${user.name || '技术员'}提交了${TYPE_ZH[targetType]} ${targetCode} 的${KIND_ZH[kind]}计划${b.faultDesc ? `：${b.faultDesc}` : ''}。计划时长 ${num(b.durationMinutes, 0)} 分钟。`,
+    payload: { plan_id: planId, plan_code: code, target_type: targetType, target_code: targetCode, kind },
+    audienceRoles: ['ADMIN', 'PMC', 'PRODUCTION', 'TECHNICIAN'],
+    refType: 'MAINTENANCE', refId: planId, level: 'WARN',
+  });
+
+  return { id: planId, code, message: `${KIND_ZH[kind]}计划 ${code} 已提交` };
+}
 
 async function findDevice(db, tenantId, type, code) {
   const table = type === 'MOLD' ? 'molds' : 'machines';

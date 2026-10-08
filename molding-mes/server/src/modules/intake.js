@@ -18,6 +18,7 @@ import { nowStr, num, arr, j } from '../lib/util.js';
 import { insertRow, updateRow, findAll, audit } from '../lib/repo.js';
 import { requirePerm } from '../middleware.js';
 import { resolveAiConfig } from '../domain/ai-config.js';
+import { AI_ERROR_MESSAGE } from '../domain/nlp.js';
 import {
   INTAKE_TARGETS, INTAKE_KEYS, rowsFromTable, fallbackParseText,
   aiParseText, aiParseModify, fallbackParseModify, coerceValue, mapHeader,
@@ -56,31 +57,11 @@ export default async function registerIntakeRoutes(app, db, ctx) {
   app.post('/api/intake/text', wrap(async (req) => {
     const user = requirePerm(req, 'master.write');
     const { target, text } = req.body || {};
-    if (!INTAKE_TARGETS[target]) return fail(`未知类型：${target}`, 'BAD_TARGET', 400);
-    const raw = String(text || '').trim();
-    if (!raw) return fail('请输入内容', 'PARAM_MISSING', 400);
-
-    const eff = await resolveAiConfig(db, user.tenant_id);
-    const usable = eff.config.enabled && eff.config.api_key;
-    let out;
-    if (usable) {
-      try {
-        out = await aiParseText(target, raw, eff.config);
-      } catch (e) {
-        const fb = fallbackParseText(target, raw);
-        out = { ...fb, warnings: [...fb.warnings, `AI 解析失败，已改用确定性解析：${e.message}`] };
-      }
-    } else {
-      out = fallbackParseText(target, raw);
-    }
-
-    const draftId = await saveDraft(db, {
-      tenantId: user.tenant_id, userId: user.id, target, source: 'TEXT',
-      rawText: raw, rows: out.rows, usedFallback: out.used_fallback || !usable,
-      message: out.warnings?.[0] || null,
-    });
-    return ok({ draft_id: draftId, target, rows: out.rows, warnings: out.warnings || [], used_fallback: !usable || !!out.used_fallback },
-      `已解析出 ${out.rows.length} 条${INTAKE_TARGETS[target].zh}，请核对后导入`);
+    const out = await parseTextToDraft(db, user, target, String(text || '').trim());
+    return ok(
+      { draft_id: out.draft_id, target, rows: out.rows, warnings: out.warnings, used_fallback: out.used_fallback },
+      `已解析出 ${out.rows.length} 条${INTAKE_TARGETS[target].zh}，请核对后导入`,
+    );
   }));
 
   /** Excel / CSV 附件解析 */
@@ -195,89 +176,10 @@ export default async function registerIntakeRoutes(app, db, ctx) {
     const user = requirePerm(req, 'master.write');
     const text = String((req.body || {}).text || '').trim();
     if (!text) return fail('请输入内容', 'PARAM_MISSING', 400);
-    const tid = user.tenant_id;
-
-    const eff = await resolveAiConfig(db, tid);
-    const usable = eff.config.enabled && eff.config.api_key;
-
-    let target = null;
-    let keyField = null;
-    let key = null;
-    let patch = null;
-    let note = null;
-    let usedFallback = false;
-
-    if (usable) {
-      try {
-        const parsed = await aiParseModify(text, eff.config, await catalogFor(db, tid));
-        target = INTAKE_TARGETS[parsed?.target] ? parsed.target : null;
-        keyField = parsed?.key_field || null;
-        key = parsed?.key ?? null;
-        patch = parsed?.patch && typeof parsed.patch === 'object' ? parsed.patch : null;
-        note = parsed?.note || null;
-      } catch (e) {
-        usedFallback = true;
-        note = `AI 解析失败，已改用句式解析：${e.message}`;
-      }
-    } else {
-      usedFallback = true;
-    }
-
-    if (!target || !patch) {
-      const fb = fallbackParseModify(text);
-      usedFallback = true;
-      if (!fb) {
-        return ok({ ok: false, message: usedFallback && !usable
-          ? '未配置 AI 接口，且这句话不符合「把 X 的 Y 改成 Z」句式，无法定位要改的记录'
-          : '没能识别出要改哪条数据，请换成「把 魔辣面筋 的 损耗率 改成 4%」这样的说法' });
-      }
-      // 先按话里的类型词判断（"产品""模具"…），判断不出就拿着关键词去各台账里找
-      target = guessTarget(text) || (await guessTargetByKey(db, tid, fb.keyword));
-      if (!target) return ok({ ok: false, message: `没能判断「${fb.keyword}」属于哪一类基础数据，请说明是产品、模具还是机台` });
-      key = fb.keyword;
-      keyField = INTAKE_TARGETS[target].key;
-      const field = matchFieldZh(target, fb.field_zh);
-      if (!field) return ok({ ok: false, message: `没能识别出字段「${fb.field_zh}」` });
-      const v = coerceValue(INTAKE_TARGETS[target].fields[field], fb.value);
-      if (v === undefined) return ok({ ok: false, message: `字段「${INTAKE_TARGETS[target].fields[field].zh}」的取值「${fb.value}」无法识别` });
-      patch = { [field]: v };
-      note = note || `按句式解析：${fb.keyword} 的 ${INTAKE_TARGETS[target].fields[field].zh} → ${fb.value}`;
-    }
-
-    // 定位记录：先按编码，再按名称/别名
-    const cfg = INTAKE_TARGETS[target];
-    const hit = await locate(db, tid, target, String(key ?? ''));
-    if (!hit) {
-      return ok({
-        ok: false, target, key: String(key ?? ''), patch, note,
-        message: `没找到${cfg.zh}「${key}」，请确认名称或编码是否正确（已录入的${cfg.zh}共 ${await countOf(db, tid, target)} 条）`,
-      });
-    }
-
-    // 只保留真正有变化的字段，给出变更前 → 变更后
-    const changes = [];
-    for (const [f, v] of Object.entries(patch)) {
-      if (!cfg.fields[f]) continue;
-      const before = hit[f];
-      if (JSON.stringify(before ?? null) === JSON.stringify(v ?? null)) continue;
-      changes.push({ field: f, zh: cfg.fields[f].zh, before, after: v });
-    }
-    if (!changes.length) {
-      return ok({ ok: false, target, record: hit, message: '识别到的字段值与现有一致，无需修改' });
-    }
-
-    const draftId = await saveDraft(db, {
-      tenantId: tid, userId: user.id, target, source: 'MODIFY',
-      rawText: text, rows: [{ [keyField || cfg.key]: hit[cfg.key], patch: Object.fromEntries(changes.map((c) => [c.field, c.after])) }],
-      usedFallback, message: note || null,
-    });
-    return ok({
-      ok: true, draft_id: draftId, target, target_zh: cfg.zh,
-      key_field: cfg.key, key: hit[cfg.key], record_id: hit.id,
-      record_name: hit.name || hit[cfg.key], changes, note,
-      used_fallback: usedFallback,
-    }, `已定位到${cfg.zh}「${hit.name || hit[cfg.key]}」，共 ${changes.length} 处改动，确认后生效`);
+    const r = await previewModify(db, user, text);
+    return ok(r, r.message || null);
   }));
+
 
   /** 确认改数 */
   app.post('/api/intake/apply', wrap(async (req) => {
@@ -310,6 +212,132 @@ export default async function registerIntakeRoutes(app, db, ctx) {
 }
 
 /* ------------------------------- 工具函数 ------------------------------ */
+
+/**
+ * 自然语言 → 记录草稿（路由与自然语言助手共用）。
+ * AI 优先；AI 不可用时退回确定性解析，并在 warnings 里写明。
+ */
+export async function parseTextToDraft(db, user, target, raw, opts = {}) {
+  if (!INTAKE_TARGETS[target]) throw new AppError(`未知类型：${target}`, 400, 'BAD_TARGET');
+  if (!raw) throw new AppError('请输入内容', 400, 'PARAM_MISSING');
+
+  const eff = await resolveAiConfig(db, user.tenant_id);
+  const usable = eff.config.enabled && eff.config.api_key;
+  // 自然语言助手通道：建档属于"本地解析不了"的意图，AI 不可用时直接报错而非猜测
+  if (!usable && opts.aiRequired) throw new AppError(AI_ERROR_MESSAGE, 503, 'AI_UNAVAILABLE');
+
+  let out;
+  if (usable) {
+    try {
+      out = await aiParseText(target, raw, eff.config);
+    } catch (e) {
+      if (opts.aiRequired) throw new AppError(AI_ERROR_MESSAGE, 503, 'AI_UNAVAILABLE');
+      const fb = fallbackParseText(target, raw);
+      out = { ...fb, warnings: [...fb.warnings, `AI 解析失败，已改用确定性解析：${e.message}`] };
+    }
+  } else {
+    out = fallbackParseText(target, raw);
+  }
+
+  const draftId = await saveDraft(db, {
+    tenantId: user.tenant_id, userId: user.id, target, source: 'TEXT',
+    rawText: raw, rows: out.rows, usedFallback: out.used_fallback || !usable,
+    message: out.warnings?.[0] || null,
+  });
+  return {
+    draft_id: draftId, target, rows: out.rows, warnings: out.warnings || [],
+    used_fallback: !usable || !!out.used_fallback,
+  };
+}
+
+/**
+ * 自然语言改数 → 变更预览（不落库；路由与自然语言助手共用）。
+ * @returns {{ok:boolean,...}} ok=false 时 message 说明为什么定位不到
+ */
+export async function previewModify(db, user, text, opts = {}) {
+  const tid = user.tenant_id;
+  const eff = await resolveAiConfig(db, tid);
+  const usable = eff.config.enabled && eff.config.api_key;
+  if (!usable && opts.aiRequired) throw new AppError(AI_ERROR_MESSAGE, 503, 'AI_UNAVAILABLE');
+
+  let target = null;
+  let keyField = null;
+  let key = null;
+  let patch = null;
+  let note = null;
+  let usedFallback = false;
+
+  if (usable) {
+    try {
+      const parsed = await aiParseModify(text, eff.config, await catalogFor(db, tid));
+      target = INTAKE_TARGETS[parsed?.target] ? parsed.target : null;
+      keyField = parsed?.key_field || null;
+      key = parsed?.key ?? null;
+      patch = parsed?.patch && typeof parsed.patch === 'object' ? parsed.patch : null;
+      note = parsed?.note || null;
+    } catch (e) {
+      if (opts.aiRequired) throw new AppError(AI_ERROR_MESSAGE, 503, 'AI_UNAVAILABLE');
+      usedFallback = true;
+      note = `AI 解析失败，已改用句式解析：${e.message}`;
+    }
+  } else {
+    usedFallback = true;
+  }
+
+  if (!target || !patch) {
+    const fb = fallbackParseModify(text);
+    usedFallback = true;
+    if (!fb) {
+      return { ok: false, message: '没能识别出要改哪条数据，请换成「把 魔辣面筋 的 损耗率 改成 4%」这样的说法', ai_required: !usable };
+    }
+    // 先按话里的类型词判断（"产品""模具"…），判断不出就拿着关键词去各台账里找
+    target = guessTarget(text) || (await guessTargetByKey(db, tid, fb.keyword));
+    if (!target) return { ok: false, message: `没能判断「${fb.keyword}」属于哪一类基础数据，请说明是产品、模具还是机台` };
+    key = fb.keyword;
+    keyField = INTAKE_TARGETS[target].key;
+    const field = matchFieldZh(target, fb.field_zh);
+    if (!field) return { ok: false, message: `没能识别出字段「${fb.field_zh}」` };
+    const v = coerceValue(INTAKE_TARGETS[target].fields[field], fb.value);
+    if (v === undefined) return { ok: false, message: `字段「${INTAKE_TARGETS[target].fields[field].zh}」的取值「${fb.value}」无法识别` };
+    patch = { [field]: v };
+    note = note || `按句式解析：${fb.keyword} 的 ${INTAKE_TARGETS[target].fields[field].zh} → ${fb.value}`;
+  }
+
+  // 定位记录：先按编码，再按名称/别名
+  const cfg = INTAKE_TARGETS[target];
+  const hit = await locate(db, tid, target, String(key ?? ''));
+  if (!hit) {
+    return {
+      ok: false, target, key: String(key ?? ''), patch, note,
+      message: `没找到${cfg.zh}「${key}」，请确认名称或编码是否正确（已录入的${cfg.zh}共 ${await countOf(db, tid, target)} 条）`,
+    };
+  }
+
+  // 只保留真正有变化的字段，给出变更前 → 变更后
+  const changes = [];
+  for (const [f, v] of Object.entries(patch)) {
+    if (!cfg.fields[f]) continue;
+    const before = hit[f];
+    if (JSON.stringify(before ?? null) === JSON.stringify(v ?? null)) continue;
+    changes.push({ field: f, zh: cfg.fields[f].zh, before, after: v });
+  }
+  if (!changes.length) {
+    return { ok: false, target, record: hit, message: '识别到的字段值与现有一致，无需修改' };
+  }
+
+  const draftId = await saveDraft(db, {
+    tenantId: tid, userId: user.id, target, source: 'MODIFY',
+    rawText: text, rows: [{ [keyField || cfg.key]: hit[cfg.key], patch: Object.fromEntries(changes.map((c) => [c.field, c.after])) }],
+    usedFallback, message: note || null,
+  });
+  return {
+    ok: true, draft_id: draftId, target, target_zh: cfg.zh,
+    key_field: cfg.key, key: hit[cfg.key], record_id: hit.id,
+    record_name: hit.name || hit[cfg.key], changes, note,
+    used_fallback: usedFallback,
+    message: `已定位到${cfg.zh}「${hit.name || hit[cfg.key]}」，共 ${changes.length} 处改动，确认后生效`,
+  };
+}
 
 async function saveDraft(db, { tenantId, userId, target, source, rawText, fileName, rows, usedFallback, message }) {
   const cleanRows = (rows || []).map((r) => {

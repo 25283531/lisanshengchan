@@ -922,8 +922,10 @@ async function chat() {
   return `
   <section><header><h2>自然语言助手 · 试跑</h2><span class="spacer"></span>
     <span class="muted">以当前登录身份执行，权限与 APP 一致</span></header>
+    <p class="hint">语义解析<strong>优先调用 AI 接口</strong>；AI 不可用时，仅「下单 / 出库 / 报工 / 库存 / 设备状态」这几类由本地解析兜底，
+      其余说法（建档、改数、维修计划等）会直接提示联系管理员，不做猜测。</p>
     <div class="row"><label style="flex:3">说一句话
-      <input id="c-text" placeholder="河北的魔辣面筋下2万个订单，13号交货"></label>
+      <input id="c-text" placeholder="添加一台设备，海天注塑机，型号700，机台编号7号机"></label>
       <button id="c-send" class="primary" style="width:auto">执行</button>
       <button id="c-parse">仅解析</button></div>
     <div class="chat-box"><pre id="c-out" style="margin:0;white-space:pre-wrap">（结果将显示在这里）</pre></div>
@@ -940,14 +942,18 @@ function bindChat() {
     $('#c-out').textContent = '执行中…';
     try {
       const r = await api('POST', '/api/chat', { text: $('#c-text').value });
-      $('#c-out').textContent = `意图：${r.intent}（置信度 ${r.confidence}，${r.used_fallback ? '确定性兜底' : 'AI'}）\n\n${r.message}`;
+      $('#c-out').textContent = r.ai_unavailable
+        ? `⚠️ ${r.message}\n\n（这句话需要 AI 解析。请联系管理员在「AI 接口配置」里填好接口信息）`
+        : `意图：${r.intent}（置信度 ${r.confidence}，${r.used_fallback ? '本地解析' : 'AI'}）\n\n${r.message}`;
       render();
     } catch (e) { $('#c-out').textContent = `失败：${e.message}`; }
   });
   $('#c-parse').addEventListener('click', async () => {
     try {
       const r = await api('POST', '/api/chat/parse', { text: $('#c-text').value });
-      $('#c-out').textContent = JSON.stringify(r, null, 2);
+      $('#c-out').textContent = r.ai_unavailable
+        ? `⚠️ ${r.message}\n${r.error_detail ? `\n${r.error_detail}` : ''}`
+        : JSON.stringify(r, null, 2);
     } catch (e) { $('#c-out').textContent = `失败：${e.message}`; }
   });
 }

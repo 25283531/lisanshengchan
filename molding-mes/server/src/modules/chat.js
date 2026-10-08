@@ -6,14 +6,17 @@
  */
 import { wrap, ok, fail, AppError } from '../lib/http.js';
 import { nowStr, num, arr, round, toStr, toDate, j } from '../lib/util.js';
-import { loadTenantData, normalizeData, audit } from '../lib/repo.js';
+import { loadTenantData, normalizeData, audit, updateRow, findAll } from '../lib/repo.js';
 import { requireUser, requirePerm } from '../middleware.js';
-import { parseUtterance } from '../domain/nlp.js';
+import { parseUtterance, AI_ERROR_MESSAGE } from '../domain/nlp.js';
+import { INTAKE_TARGETS, INTAKE_KEYS } from '../domain/intake.js';
 import { materialDemand, labelDemand, checkAvailability } from '../domain/material.js';
 import { push, decisionZh } from '../domain/notify.js';
 import { runAndPersistSchedule } from './schedule.js';
 import { can } from '../lib/rbac.js';
 import { resolveAiConfig } from '../domain/ai-config.js';
+import { parseTextToDraft, previewModify } from './intake.js';
+import { createPlan } from './maintenance.js';
 
 const fmtTime = (s) => (s ? String(s).slice(5, 16) : '-');
 
@@ -54,11 +57,14 @@ export default function registerChatRoutes(app, db, ctx) {
       message: result.message,
       confidence: round(parsed.confidence ?? 0, 2),
       used_fallback: !!parsed.usedFallback,
+      degraded: !!parsed.degraded,
       needs_confirm: !!result.needsConfirm,
       candidates: result.candidates || [],
       data: result.data ?? null,
       parsed: parsed.payload,
-      error: parsed.error || null,
+      ai_unavailable: !!parsed.aiUnavailable,
+      error: parsed.aiUnavailable ? AI_ERROR_MESSAGE : (parsed.error || null),
+      error_detail: parsed.errorDetail || null,
     });
   }));
 
@@ -74,7 +80,10 @@ export default function registerChatRoutes(app, db, ctx) {
     return ok({
       intent: parsed.intent, payload: parsed.payload, confidence: round(parsed.confidence ?? 0, 2),
       needs_confirm: parsed.needsConfirm, candidates: parsed.candidates,
-      used_fallback: !!parsed.usedFallback, error: parsed.error || null,
+      used_fallback: !!parsed.usedFallback, degraded: !!parsed.degraded,
+      ai_unavailable: !!parsed.aiUnavailable,
+      error: parsed.aiUnavailable ? AI_ERROR_MESSAGE : (parsed.error || null),
+      error_detail: parsed.errorDetail || null,
     });
   }));
 
@@ -302,14 +311,136 @@ async function dispatch(db, ctx, user, data, parsed, { raw, confirm }) {
       return { status: 'OK', message: `近期排产：\n${lines.join('\n')}`, data: { tasks: rows } };
     }
 
+    /* --------------------- 设备状态（本地可查） --------------------- */
+    case 'MACHINE_STATUS': {
+      const zh = { AVAILABLE: '可用', FAULT: '故障', MAINTENANCE: '保养/维修中' };
+      const m = parsed.resolved?.machine || null;
+      if (m) {
+        return {
+          status: 'OK',
+          message: `机台 ${m.code}${m.name ? `（${m.name}）` : ''}${m.model ? `　型号 ${m.model}` : ''}\n状态：${zh[m.status] || m.status}${m.current_mold_code ? `\n当前模具：${m.current_mold_code}` : ''}`,
+          data: { machine_code: m.code, status: m.status },
+        };
+      }
+      const list = data.machines || [];
+      if (!list.length) return { status: 'OK', message: '尚未建档任何机台。', data: { machines: [] } };
+      const lines = list.map((x) => `${x.code}${x.name ? `（${x.name}）` : ''}：${zh[x.status] || x.status}`);
+      return { status: 'OK', message: `机台状态（共 ${list.length} 台）：\n${lines.join('\n')}`, data: { machines: list.map((x) => ({ code: x.code, name: x.name, status: x.status })) } };
+    }
+
+    /* ----------------- 新增基础数据（AI 解析 + 人工确认） -------------- */
+    case 'MASTER_CREATE': {
+      if (!can(user.role, 'master.write')) throw new AppError('当前角色无权维护基础数据', 403, 'FORBIDDEN');
+      const target = parsed.payload?.target;
+      if (!INTAKE_TARGETS[target]) {
+        return {
+          status: 'NEED_CONFIRM', needsConfirm: true,
+          message: '没能判断要新增哪一类基础数据，请说明是产品、客户、机台、模具还是原料。',
+          candidates: [{ field: 'target', input: target || null, options: INTAKE_KEYS.map((k) => ({ id: k, name: INTAKE_TARGETS[k].zh })) }],
+        };
+      }
+      const out = await parseTextToDraft(db, user, target, raw, { aiRequired: true });
+      const cfg = INTAKE_TARGETS[target];
+      if (!out.rows.length) {
+        return {
+          status: 'NEED_CONFIRM', needsConfirm: true,
+          message: `没能从这句话里解析出${cfg.zh}记录。${out.warnings?.[0] || ''}`,
+          candidates: [],
+        };
+      }
+      const lines = out.rows.map((r, i) => {
+        const tail = Object.entries(r)
+          .filter(([k]) => !['_row', cfg.key, 'name'].includes(k))
+          .map(([k, v]) => `｜${cfg.fields[k]?.zh || k}：${Array.isArray(v) ? v.join('、') : v}`)
+          .join('');
+        return `${i + 1}. ${cfg.key} ${r[cfg.key] ?? '（缺）'}${r.name ? `｜名称 ${r.name}` : ''}${tail}`;
+      });
+      return {
+        status: 'NEED_CONFIRM', needsConfirm: true,
+        message: `已解析出 ${out.rows.length} 条${cfg.zh}（草稿 #${out.draft_id}）：\n${lines.join('\n')}\n\n请到管理后台「基础数据 → 智能录入」核对后导入。`,
+        data: { draft_id: out.draft_id, target, rows: out.rows, warnings: out.warnings },
+      };
+    }
+
+    /* -------------------- 修改基础数据（预览 + 确认） ------------------ */
+    case 'MASTER_UPDATE': {
+      if (!can(user.role, 'master.write')) throw new AppError('当前角色无权维护基础数据', 403, 'FORBIDDEN');
+      const pv = await previewModify(db, user, raw, { aiRequired: true });
+      if (!pv.ok) return { status: 'NEED_CONFIRM', needsConfirm: true, message: pv.message, candidates: [] };
+
+      const cfg = INTAKE_TARGETS[pv.target];
+      const detail = pv.changes.map((c) => `${c.zh}：${fmtVal(c.before)} → ${fmtVal(c.after)}`).join('\n');
+      if (confirm) {
+        const patch = Object.fromEntries(pv.changes.map((c) => [c.field, c.after]));
+        if (cfg.timestamps?.updated) patch.updated_at = nowStr();
+        await updateRow(db, cfg.table, pv.record_id, patch, { tenantId: tid, jsonFields: cfg.json });
+        await audit(db, {
+          tenantId: tid, userId: user.id, action: 'chat.master.update',
+          detail: { target: pv.target, id: pv.record_id, patch, text: raw },
+        });
+        return {
+          status: 'OK',
+          message: `${cfg.zh}「${pv.record_name}」已更新\n${detail}`,
+          data: { target: pv.target, record_id: pv.record_id, patch },
+        };
+      }
+      return {
+        status: 'NEED_CONFIRM', needsConfirm: true,
+        message: `${cfg.zh}「${pv.record_name}」\n${detail}\n\n回复「确认」后生效。`,
+        data: { draft_id: pv.draft_id, target: pv.target, record_id: pv.record_id, changes: pv.changes },
+      };
+    }
+
+    /* --------------------- 设备维修 / 保养计划 ---------------------- */
+    case 'MAINTENANCE_PLAN': {
+      if (!can(user.role, 'maintenance.write')) throw new AppError('当前角色无权提交维修计划（需要技术员或管理员）', 403, 'FORBIDDEN');
+      const p = parsed.payload || {};
+      const targetCode = String(p.target_code || '').trim();
+      if (!targetCode) {
+        return {
+          status: 'NEED_CONFIRM', needsConfirm: true,
+          message: '没识别出是哪台设备 / 哪套模具，请说明编号，例如「3号机漏料，明天上午安排维修」。',
+          candidates: [{
+            field: 'target_code', input: null,
+            options: (data.machines || []).slice(0, 10).map((m) => ({ id: m.code, name: `机台 ${m.code}${m.name ? `（${m.name}）` : ''}` })),
+          }],
+        };
+      }
+      try {
+        const r = await createPlan(db, user, {
+          targetType: p.target_type, targetCode, kind: p.kind,
+          faultDesc: p.fault_desc, planStartAt: p.plan_start_at,
+          durationMinutes: p.duration_minutes,
+        });
+        return {
+          status: 'OK',
+          message: `${r.message}\n设备：${targetCode}${p.fault_desc ? `　问题：${p.fault_desc}` : ''}\n已通知：管理员 / PMC / 生产 / 技术员`,
+          data: { plan_id: r.id, plan_code: r.code },
+        };
+      } catch (e) {
+        return { status: 'NEED_CONFIRM', needsConfirm: true, message: e.message, candidates: [] };
+      }
+    }
+
     default:
+      // AI 不可用且本地解析接不住：明确报错，不做低质量猜测
+      if (parsed.aiUnavailable) {
+        return { status: 'AI_UNAVAILABLE', needsConfirm: false, message: AI_ERROR_MESSAGE, candidates: [] };
+      }
       return {
         status: 'UNKNOWN',
-        message: '没理解这句话。可以这样说：\n· 河北的魔辣面筋下 2 万个订单，13 号交货\n· 河北麻辣面筋出库 5000 个\n· 麻辣面筋报工 3000 个\n· PP 库存还有多少',
+        message: '没理解这句话。可以这样说：\n· 河北的魔辣面筋下 2 万个订单，13 号交货\n· 河北麻辣面筋出库 5000 个\n· 麻辣面筋报工 3000 个\n· PP 库存还有多少\n· 添加一台设备，海天注塑机，型号700，机台编号7号机',
         candidates: [],
       };
   }
 }
+
+const fmtVal = (v) => {
+  if (v === null || v === undefined || v === '') return '（空）';
+  if (Array.isArray(v)) return v.join('、');
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+};
 
 async function newOrderCode(db, tid) {
   for (let i = 0; i < 20; i += 1) {

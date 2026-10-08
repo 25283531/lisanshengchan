@@ -79,6 +79,7 @@ export const INTAKE_TARGETS = {
     fields: {
       code: { zh: '机台编号', aliases: ['编码', '机台编号', '编号', 'code'], required: true },
       name: { zh: '机台名称', aliases: ['名称', '机台名称', '机台'] },
+      model: { zh: '型号/吨位', aliases: ['型号', '吨位', '规格', '机型', '锁模力'] },
       status: { zh: '状态', aliases: ['状态'], enum: ['AVAILABLE', 'FAULT', 'MAINTENANCE'], default: 'AVAILABLE' },
       mold_change_minutes: { zh: '换模时长(分)', aliases: ['换模时长', '换模时间', '换模分钟'], type: 'num', default: 45 },
       units_per_hour: { zh: '默认效率(件/时)', aliases: ['效率', '件每小时', '产能', '每小时产量'], type: 'num', default: 0 },

@@ -236,6 +236,8 @@ export const TABLES = [
       ['tenant_id', 'INT'],
       ['code', 'STR', 64],
       ['name', 'STR', 128, null, true],
+      /** 型号 / 吨位，如「海天 700T」的「700」 */
+      ['model', 'STR', 64, null, true],
       ['status', 'STR', 20, 'AVAILABLE'],
       ['current_mold_code', 'STR', 64, null, true],
       ['mold_change_minutes', 'INT', null, 45],

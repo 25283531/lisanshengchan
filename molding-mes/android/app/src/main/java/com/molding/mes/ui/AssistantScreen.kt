@@ -99,7 +99,19 @@ fun AssistantScreen() {
                     Text("置信度 ${String.format("%.2f", r.confidence)}", fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
                     r.message?.let {
-                        Text(it, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        Text(
+                            it, fontSize = 13.sp,
+                            color = if (r.ai_unavailable) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    if (r.degraded && !r.ai_unavailable) {
+                        Text(
+                            "提示：本次为本地解析（AI 未参与），仅支持下单 / 出库 / 报工 / 库存 / 设备状态。",
+                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
                     }
                     if (r.needs_confirm && r.candidates.isNotEmpty()) {
                         Text("需要从以下候选中确认：", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -113,7 +125,8 @@ fun AssistantScreen() {
         }
 
         Text(
-            "解析不出来的实体会列成候选让你确认，不会拿估算值硬填。",
+            "语义解析优先调用 AI，AI 不可用时仅下单 / 出库 / 报工 / 库存 / 设备状态可本地兜底；" +
+                "解析不出来的实体会列成候选让你确认，不会拿估算值硬填。",
             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f)
         )
     }
