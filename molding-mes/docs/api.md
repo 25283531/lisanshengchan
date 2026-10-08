@@ -19,13 +19,14 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/auth/login` | 密码登录 `{phone,password,tenantCode?}` |
-| POST | `/api/auth/sms/send` | 发送验证码（演示模式返回 `demo_code`） |
-| POST | `/api/auth/sms/login` | 验证码登录 |
-| GET | `/api/auth/me` | 当前用户、角色、权限、公司 |
-| POST | `/api/auth/password` | 修改密码 |
+| POST | `/api/auth/login` | 手机号 + 密码登录 `{phone,password,tenantCode?}`，返回 `must_change_password` |
+| GET | `/api/auth/me` | 当前用户、角色、权限、公司、密码状态 |
+| POST | `/api/auth/password` | 修改本人密码 `{oldPassword,newPassword}`，改完清初始密码标记 |
+| POST | `/api/auth/password/later` | 暂不修改，保留管理员下发的初始密码 |
 
-未授权手机号返回 `403 NOT_AUTHORIZED`。
+未授权手机号返回 `403 NOT_AUTHORIZED`；账号未设置初始密码返回 `403 NO_PASSWORD`。
+
+> v3.4 起短信验证码登录已下线，改为「管理员下发初始密码 + 员工自选是否修改」。
 
 ## 公司管理员
 
@@ -33,10 +34,11 @@
 |---|---|---|---|
 | GET | `/api/admin/overview` | employee.manage | 概览：授权、主数据条数、AI 状态、建档完成度 |
 | GET | `/api/admin/employees` | employee.manage | 员工列表 |
-| POST | `/api/admin/employees` | employee.manage | **录入手机号 = 授权登录**，分配角色与机台 |
+| POST | `/api/admin/employees` | employee.manage | **录入手机号 = 授权登录**，分配角色与机台，同时下发初始密码（`password` 留空则随机 6 位，明文仅本次返回） |
 | PUT | `/api/admin/employees/:id` | employee.manage | 改角色 / 机台绑定 / 停用 |
 | DELETE | `/api/admin/employees/:id` | employee.manage | 停用（保留历史归属） |
-| POST | `/api/admin/employees/:id/password` | employee.manage | 重置密码 |
+| POST | `/api/admin/employees/:id/password` | employee.manage | 下发 / 重置初始密码（留空随机，返回 `initial_password`） |
+| POST | `/api/admin/employees/init-passwords` | employee.manage | 批量初始化密码 `{password?, ids?}`，可为全员统一下发或每人随机 |
 | GET/PUT | `/api/admin/ai-config` | employee.manage | AI 接口配置读写 |
 | POST | `/api/admin/ai-config/test` | employee.manage | 连通性测试 |
 | GET | `/api/admin/roles` | employee.manage | 角色字典 |

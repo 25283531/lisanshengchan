@@ -16,13 +16,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.molding.mes.data.Repo
 import com.molding.mes.data.Session
 import com.molding.mes.worker.PollWorker
+import kotlinx.coroutines.launch
 
 @Composable
 fun MeScreen(onLogout: () -> Unit) {
@@ -47,6 +51,56 @@ fun MeScreen(onLogout: () -> Unit) {
                 )
             }
         }
+
+        SectionTitle("修改密码")
+        var oldPwd by remember { mutableStateOf("") }
+        var newPwd by remember { mutableStateOf("") }
+        var newPwd2 by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        var pwdMsg by remember { mutableStateOf<String?>(null) }
+        val pwdScope = rememberCoroutineScope()
+
+        if (Session.mustChangePassword) {
+            Text("当前仍在使用管理员下发的初始密码，建议修改为本人密码。", fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.error)
+        }
+        OutlinedTextField(
+            value = oldPwd, onValueChange = { oldPwd = it },
+            label = { Text("当前密码") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        OutlinedTextField(
+            value = newPwd, onValueChange = { newPwd = it },
+            label = { Text("新密码（至少 6 位）") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        OutlinedTextField(
+            value = newPwd2, onValueChange = { newPwd2 = it },
+            label = { Text("确认新密码") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Button(
+            onClick = {
+                when {
+                    newPwd.length < 6 -> pwdMsg = "新密码至少 6 位"
+                    newPwd != newPwd2 -> pwdMsg = "两次输入的新密码不一致"
+                    else -> {
+                        pwdMsg = null; busy = true
+                        pwdScope.launch {
+                            Repo.changePassword(oldPwd, newPwd)
+                                .onSuccess {
+                                    Session.mustChangePassword = false
+                                    oldPwd = ""; newPwd = ""; newPwd2 = ""
+                                    busy = false; pwdMsg = "密码已修改，下次登录请使用新密码"
+                                }
+                                .onFailure { busy = false; pwdMsg = it.message }
+                        }
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(), enabled = !busy,
+        ) { Text("保存新密码") }
+        pwdMsg?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary) }
 
         SectionTitle("服务端地址")
         OutlinedTextField(

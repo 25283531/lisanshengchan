@@ -1,5 +1,45 @@
 # 更新日志
 
+## v3.4.0（标签 `v3.4`）
+
+**登录改为「手机号 + 初始密码」，短信验证码下线；新增安卓 APK 与服务端镜像的 CI 工作流。**
+
+**登录与初始密码**
+
+- 移除 `POST /api/auth/sms/send` 与 `/api/auth/sms/login`（短信验证码登录下线）
+- 管理员下发初始密码：
+  - `POST /api/admin/employees` 录入手机号时可指定 `password`，留空则随机生成 6 位数字
+  - `POST /api/admin/employees/:id/password` 单人重置（留空随机）
+  - `POST /api/admin/employees/init-passwords` 批量初始化，支持全员统一下发或每人随机
+  - 明文初始密码**只在接口响应中出现一次**，库中只存 scrypt 散列
+- 员工自选是否修改：
+  - 登录返回 `must_change_password`；`GET /api/auth/me` 同步暴露密码状态
+  - `POST /api/auth/password` 修改后立即清除初始密码标记（校验原密码、禁止与旧密码相同、≥6 位）
+  - `POST /api/auth/password/later` 保留初始密码，只关闭本次提醒
+  - 未设置初始密码的账号登录返回 `403 NO_PASSWORD`
+- `users` 表新增 `must_change_password`、`password_updated_at`；
+  `db/index.js` 新增 `syncColumns()`：已有库执行 `npm run migrate` 即可增量补列（MySQL / SQLite 双方言）
+- 管理后台「员工授权」页：初始密码输入框、密码状态列（未设置 / 待修改 / 已改）、
+  单人下发与批量初始化按钮，下发结果面板一次性展示明文
+- 安卓端：登录页只保留手机号 + 密码；首次登录弹窗「是否修改初始密码」（保存 / 以后再说）；
+  「我的」页新增修改密码卡片
+- 新增 `server/scripts/password-demo.js`：36 项断言覆盖全流程（短信已下线、未授权/错误密码/未设密码拦截、
+  初始密码登录、改密强弱校验、以后再说、批量初始化、单人重置、越权）
+
+**安卓端**
+
+- 默认服务端地址改为 `https://zs.250886.xyz/`（`DEFAULT_BASE_URL`），版本 3.4.0（versionCode 7）
+
+**CI 与部署**
+
+- `.github/workflows/mes-android.yml`：JDK 17 + Gradle 8.9 构建 debug/release APK，
+  上传 artifact；配置了 `ANDROID_KEYSTORE_BASE64` 等密钥时自动 zipalign + apksigner 签名
+- `.github/workflows/mes-server-docker.yml`：构建并推送 GHCR 镜像
+  `ghcr.io/<owner>/<repo>-mes-server` 与 `-mes-optimizer`；PR 时只构建并跑 `/api/health` 冒烟
+- 新增 `server/Dockerfile`（node:22-bookworm-slim，非 root 运行，内置健康检查，启动自动建表/补列）
+  与 `molding-mes/.dockerignore`
+- `docker-compose.yml` 增加 `server` 服务（MySQL + 求解器 + 服务端一键起）
+
 ## v3.3.0（标签 `v3.3`）
 
 **接入真实微信小程序 `wx8be948bf11ef3fca`，改走「管理员签发绑定码」作为默认绑定方式。**

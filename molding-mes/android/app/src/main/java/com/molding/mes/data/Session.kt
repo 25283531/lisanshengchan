@@ -25,6 +25,7 @@ object Session {
     private const val K_ROLE_ZH = "role_zh"
     private const val K_MACHINE = "machine_code"
     private const val K_PHONE = "phone"
+    private const val K_MUST_CHANGE = "must_change_password"
 
     private lateinit var prefs: SharedPreferences
 
@@ -65,6 +66,11 @@ object Session {
         get() = prefs.getString(K_PHONE, "") ?: ""
         set(v) = prefs.edit().putString(K_PHONE, v).apply()
 
+    /** 是否仍在使用管理员下发的初始密码 */
+    var mustChangePassword: Boolean
+        get() = prefs.getBoolean(K_MUST_CHANGE, false)
+        set(v) = prefs.edit().putBoolean(K_MUST_CHANGE, v).apply()
+
     val isLoggedIn: Boolean get() = !token.isNullOrBlank()
 
     fun saveLogin(data: LoginData) {
@@ -75,6 +81,7 @@ object Session {
         machineCode = data.user.machine_code
         phone = data.user.phone
         tenantCode = data.tenant.code
+        mustChangePassword = data.must_change_password
     }
 
     fun clear() = prefs.edit().clear().apply()

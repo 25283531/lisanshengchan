@@ -54,14 +54,23 @@ export default function registerAdminRoutes(app, db, ctx) {
   app.get('/api/admin/employees', wrap(async (req) => {
     const user = adminOnly(req);
     const rows = await db.query(
-      `SELECT id, phone, name, role, status, machine_code, last_login_at, created_at
+      `SELECT id, phone, name, role, status, machine_code, last_login_at, created_at,
+              password_hash, must_change_password, password_updated_at
        FROM users WHERE tenant_id = ? ORDER BY role, id`,
       [user.tenant_id],
     );
-    return ok(rows.map((r) => ({ ...r, role_zh: roleZh(r.role) })));
+    return ok(rows.map((r) => ({
+      id: r.id, phone: r.phone, name: r.name, role: r.role, role_zh: roleZh(r.role),
+      status: r.status, machine_code: r.machine_code, last_login_at: r.last_login_at, created_at: r.created_at,
+      has_password: !!r.password_hash,
+      must_change_password: !!r.must_change_password,
+      password_updated_at: r.password_updated_at || null,
+      /** 初始密码 / 已自行修改 / 未设置 */
+      password_state: !r.password_hash ? 'NONE' : (r.must_change_password ? 'INITIAL' : 'CHANGED'),
+    })));
   }));
 
-  /** 录入手机号 = 授权该号码可登录 */
+  /** 录入手机号 = 授权该号码可登录，同时下发初始密码 */
   app.post('/api/admin/employees', wrap(async (req) => {
     const user = adminOnly(req);
     const tid = user.tenant_id;
@@ -74,14 +83,18 @@ export default function registerAdminRoutes(app, db, ctx) {
     }
     await checkSeat(db, req.tenant);
 
+    const init = resolveInitialPassword(b);
     const id = await db.run(
-      `INSERT INTO users (tenant_id, phone, name, password_hash, role, status, machine_code, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-      [tid, phone, String(b.name || '').trim() || '未命名', hashPassword(String(b.password || '123456')),
+      `INSERT INTO users (tenant_id, phone, name, password_hash, must_change_password, role, status, machine_code, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [tid, phone, String(b.name || '').trim() || '未命名', hashPassword(init), 1,
         b.role, 'ACTIVE', b.machineCode || null, nowStr(), nowStr()],
     );
     await audit(db, { tenantId: tid, userId: user.id, action: 'employee.authorize', detail: { phone, role: b.role } });
-    return ok({ id: Number(id.insertId), phone }, `已授权 ${phone}（${roleZh(b.role)}），初始密码 123456`);
+    return ok(
+      { id: Number(id.insertId), phone, initial_password: init, must_change_password: true },
+      `已授权 ${phone}（${roleZh(b.role)}），初始密码 ${init}，请告知本人`,
+    );
   }));
 
   app.put('/api/admin/employees/:id', wrap(async (req) => {
@@ -125,13 +138,64 @@ export default function registerAdminRoutes(app, db, ctx) {
     return ok(null, '已停用该账号');
   }));
 
+  /**
+   * 单人重置 / 下发初始密码。
+   * 不传 password 时由系统随机生成；返回明文一次（服务端只存散列，明文仅此一回）。
+   */
   app.post('/api/admin/employees/:id/password', wrap(async (req) => {
     const user = adminOnly(req);
-    const pwd = String((req.body || {}).password || '');
-    if (pwd.length < 6) return fail('密码至少 6 位', 'WEAK_PASSWORD', 400);
-    await db.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ? AND tenant_id = ?',
-      [hashPassword(pwd), nowStr(), Number(req.params.id), user.tenant_id]);
-    return ok(null, '密码已重置');
+    const tid = user.tenant_id;
+    const id = Number(req.params.id);
+    const target = await db.get('SELECT id, phone, name FROM users WHERE id = ? AND tenant_id = ?', [id, tid]);
+    if (!target) return fail('员工不存在', 'NOT_FOUND', 404);
+    const init = resolveInitialPassword(req.body || {});
+    await db.run(
+      `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL, updated_at = ?
+       WHERE id = ? AND tenant_id = ?`,
+      [hashPassword(init), nowStr(), id, tid],
+    );
+    await audit(db, { tenantId: tid, userId: user.id, action: 'employee.reset_password', detail: { id, phone: target.phone } });
+    return ok({ id, phone: target.phone, name: target.name, initial_password: init, must_change_password: true },
+      `已为 ${target.phone} 下发初始密码 ${init}`);
+  }));
+
+  /**
+   * 批量初始化密码：为本公司全部在职员工（或指定 id 列表）统一下发初始密码。
+   * 不传 password 时每人各自随机生成，互不相同的明文只在本次响应中返回一次。
+   */
+  app.post('/api/admin/employees/init-passwords', wrap(async (req) => {
+    const user = adminOnly(req);
+    const tid = user.tenant_id;
+    const b = req.body || {};
+    const shared = b.password ? String(b.password) : null;
+    if (shared && shared.length < 6) return fail('密码至少 6 位', 'WEAK_PASSWORD', 400);
+
+    let rows;
+    let args = [tid];
+    let where = "tenant_id = ? AND status = 'ACTIVE'";
+    if (Array.isArray(b.ids) && b.ids.length) {
+      where += ` AND id IN (${b.ids.map(() => '?').join(',')})`;
+      args = [...args, ...b.ids.map(Number)];
+    }
+    rows = await db.query(`SELECT id, phone, name FROM users WHERE ${where} ORDER BY id`, args);
+    if (!rows.length) return fail('没有需要初始化的在职员工', 'NOT_FOUND', 404);
+
+    const issued = [];
+    for (const r of rows) {
+      const pwd = shared || randomPassword();
+      await db.run(
+        `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL, updated_at = ?
+         WHERE id = ? AND tenant_id = ?`,
+        [hashPassword(pwd), nowStr(), r.id, tid],
+      );
+      issued.push({ id: r.id, phone: r.phone, name: r.name, initial_password: pwd });
+    }
+    await audit(db, {
+      tenantId: tid, userId: user.id, action: 'employee.init_passwords',
+      detail: { count: issued.length, shared: !!shared, ids: issued.map((i) => i.id) },
+    });
+    return ok({ count: issued.length, items: issued },
+      `已为 ${issued.length} 名员工下发初始密码，请逐一通知本人（明文仅本次返回）`);
   }));
 
   /* ------------------------------ AI 配置 ------------------------------ */
@@ -231,6 +295,22 @@ export default function registerAdminRoutes(app, db, ctx) {
     );
     return ok(rows);
   }));
+}
+
+/**
+ * 初始密码取值：管理员显式指定则用之（不足 6 位直接报错），未指定则随机生成 6 位数字。
+ * 明文只在接口响应里出现一次，库里只存 scrypt 散列。
+ */
+function resolveInitialPassword(b) {
+  const given = b.password === undefined || b.password === null || b.password === '' ? null : String(b.password);
+  if (given === null) return randomPassword();
+  if (given.length < 6) throw new AppError('初始密码至少 6 位', 400, 'WEAK_PASSWORD');
+  return given;
+}
+
+/** 6 位数字初始密码（便于电话/口头告知，员工首次登录后可自行改） */
+function randomPassword() {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function maskKey(k) {

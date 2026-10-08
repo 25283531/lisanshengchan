@@ -1,0 +1,123 @@
+# 注塑生产协同 MES · 安卓 APP 构建
+#
+# 说明：MES 位于本仓库的 molding-mes/ 子目录，而 GitHub 只识别「仓库根」的
+# .github/workflows，因此本文件放在仓库根，构建上下文指向 ./molding-mes/android。
+#
+# 签名（可选）：在仓库 Settings → Secrets 里配置
+#   ANDROID_KEYSTORE_BASE64      —— base64(keystore.jks)
+#   ANDROID_KEYSTORE_PASSWORD    —— keystore 口令
+#   ANDROID_KEY_ALIAS            —— 别名
+#   ANDROID_KEY_PASSWORD         —— 别名口令
+# 未配置时只产出未签名 release APK（可直接用于内部分发/自测）。
+
+name: MES Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        type: choice
+        options: [both, release, debug]
+        default: both
+  push:
+    branches: [main]
+    paths:
+      - 'molding-mes/android/**'
+      - '.github/workflows/mes-android.yml'
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mes-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Resolve build type
+        id: bt
+        working-directory: molding-mes/android
+        run: |
+          BT="${{ github.event.inputs.build_type }}"
+          if [ "${{ github.event_name }}" = "release" ]; then BT="release"; fi
+          [ -z "$BT" ] && BT="both"
+          echo "type=$BT" >> "$GITHUB_OUTPUT"
+          echo "构建类型：$BT"
+
+      - name: Build debug APK
+        if: steps.bt.outputs.type == 'debug' || steps.bt.outputs.type == 'both'
+        working-directory: molding-mes/android
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Build release APK
+        if: steps.bt.outputs.type == 'release' || steps.bt.outputs.type == 'both'
+        working-directory: molding-mes/android
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Check signing secrets
+        id: sign
+        run: echo "enabled=${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'true' || 'false' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign release APK
+        if: steps.sign.outputs.enabled == 'true' && (steps.bt.outputs.type == 'release' || steps.bt.outputs.type == 'both')
+        working-directory: molding-mes/android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner | sort -V | tail -1)
+          ZIPALIGN=$(ls "$SDK"/build-tools/*/zipalign | sort -V | tail -1)
+          echo "$KS_B64" | base64 -d > /tmp/mes.jks
+          for apk in app/build/outputs/apk/release/*.apk; do
+            "$ZIPALIGN" -f 4 "$apk" /tmp/aligned.apk
+            "$APKSIGNER" sign --ks /tmp/mes.jks --ks-key-alias "$KS_ALIAS" \
+              --ks-pass "pass:$KS_PASS" --key-pass "pass:$KEY_PASS" \
+              --out /tmp/signed.apk /tmp/aligned.apk
+            mv /tmp/signed.apk "$apk"
+          done
+          rm -f /tmp/mes.jks /tmp/aligned.apk
+          echo "已对 release APK 签名并 zipalign"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: molding-mes-apk-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            molding-mes/android/app/build/outputs/apk/debug/*.apk
+            molding-mes/android/app/build/outputs/apk/release/*.apk
+
+      - name: Summary
+        run: |
+          {
+            echo "### 安卓构建完成"
+            echo ""
+            echo "- 事件：${{ github.event_name }}"
+            echo "- 构建类型：${{ steps.bt.outputs.type }}"
+            echo "- 签名：${{ steps.sign.outputs.enabled == 'true' && '已签名' || '未签名（未配置密钥）' }}"
+            echo "- 默认服务端：https://zs.250886.xyz/"
+          } >> "$GITHUB_STEP_SUMMARY"

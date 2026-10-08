@@ -20,6 +20,9 @@ data class LoginData(
     val expires_in_hours: Int? = null,
     val user: UserInfo,
     val tenant: TenantInfo,
+    /** 当前仍在使用管理员下发的初始密码：APP 提示员工自行决定是否修改 */
+    val must_change_password: Boolean = false,
+    val password_hint: String? = null,
 )
 
 data class UserInfo(

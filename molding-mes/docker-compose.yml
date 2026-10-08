@@ -1,7 +1,42 @@
-# 生产用 MySQL 实例 + CP-SAT 排产求解器。
+# 一键起：服务端 + CP-SAT 排产求解器 + MySQL 实例。
 # 开发环境可继续用内置 SQLite（DB_DIALECT=sqlite），并可不启动 optimizer
 # （此时服务端自动降级到内置列表调度）。
+#
+#   docker compose up -d --build
+#   管理后台 http://<host>:8080/admin/
 services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: molding-mes-server:3.4
+    container_name: molding-mes-server
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      NODE_ENV: production
+      PORT: 8080
+      HOST: 0.0.0.0
+      # 生产务必改成自己的随机值（也可在同级目录放 .env 由 compose 注入）
+      JWT_SECRET: ${JWT_SECRET:-change-this-to-a-long-random-string}
+      PLATFORM_TOKEN: ${PLATFORM_TOKEN:-change-this-platform-token}
+      DB_DIALECT: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: mes
+      DB_PASSWORD: mes123456
+      DB_NAME: molding_mes
+      OPTIMIZER_ENABLED: "true"
+      OPTIMIZER_URL: http://optimizer:8090
+      SERVE_ADMIN_WEB: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      optimizer:
+        condition: service_started
+
   optimizer:
     build: ./optimizer
     container_name: molding-mes-optimizer

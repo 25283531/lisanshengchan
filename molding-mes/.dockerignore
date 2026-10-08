@@ -1,0 +1,10 @@
+**/node_modules
+**/.git
+**/.gitignore
+**/*.log
+server/data
+server/.env
+server/*.db
+server/*.db-shm
+server/*.db-wal
+docs/**/*.png

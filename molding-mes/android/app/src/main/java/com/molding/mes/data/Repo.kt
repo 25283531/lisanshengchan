@@ -19,13 +19,14 @@ object Repo {
     suspend fun login(phone: String, password: String, tenantCode: String): Result<LoginData> =
         call { Session.api.login(mapOf("phone" to phone, "password" to password, "tenantCode" to tenantCode)) }
 
-    suspend fun sendSms(phone: String, tenantCode: String): Result<Map<String, Any?>> =
-        call { Session.api.sendSms(mapOf("phone" to phone, "tenantCode" to tenantCode)) }
-
-    suspend fun loginSms(phone: String, code: String, tenantCode: String): Result<LoginData> =
-        call { Session.api.loginSms(mapOf("phone" to phone, "code" to code, "tenantCode" to tenantCode)) }
-
     suspend fun me(): Result<MeData> = call { Session.api.me() }
+
+    /** 修改本人密码（需先输入当前密码） */
+    suspend fun changePassword(oldPassword: String, newPassword: String): Result<Unit> =
+        unit { Session.api.changePassword(mapOf("oldPassword" to oldPassword, "newPassword" to newPassword)) }
+
+    /** 暂不修改，保留管理员下发的初始密码 */
+    suspend fun keepInitialPassword(): Result<Unit> = unit { Session.api.keepInitialPassword(emptyMap()) }
 
     suspend fun notifications(limit: Int = 50, unreadOnly: Boolean = false, type: String? = null): Result<List<NotificationItem>> =
         call { Session.api.notifications(limit, if (unreadOnly) 1 else null, type) }

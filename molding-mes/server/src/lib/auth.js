@@ -58,7 +58,7 @@ export function verifyJwt(token) {
   return payload;
 }
 
-/** 短信验证码（演示模式返回明文；生产应接短信网关） */
+/** 生成一次性码（绑定码等场景用；短信验证码登录 v3.4 起已下线） */
 export function makeCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }

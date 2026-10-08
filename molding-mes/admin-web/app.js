@@ -164,29 +164,72 @@ async function employees() {
       <label>角色<select id="e-role">${roles.map((r) => `<option value="${r.role}">${esc(r.zh)}</option>`).join('')}</select></label>
       <label>绑定机台<select id="e-machine"><option value="">不绑定（接收全部机台消息）</option>
         ${machines.map((m) => `<option value="${esc(m.code)}">${esc(m.code)} ${esc(m.name || '')}</option>`).join('')}</select></label>
+      <label>初始密码<input id="e-pwd" placeholder="留空自动生成 6 位"></label>
       <button id="e-add" class="primary" style="width:auto">授权</button>
+      <button id="e-init-all" style="width:auto">批量初始化密码</button>
     </div>
-    <table><thead><tr><th>手机号</th><th>姓名</th><th>角色</th><th>绑定机台</th><th>状态</th><th>最近登录</th><th></th></tr></thead>
+    <table><thead><tr><th>手机号</th><th>姓名</th><th>角色</th><th>绑定机台</th><th>状态</th><th>密码</th><th>最近登录</th><th></th></tr></thead>
     <tbody>${list.map((u) => `<tr data-id="${u.id}">
       <td>${esc(u.phone)}</td><td>${esc(u.name)}</td><td>${esc(u.role_zh)}</td>
       <td>${esc(u.machine_code || '—')}</td>
       <td><span class="tag ${u.status === 'ACTIVE' ? 'ok' : 'err'}">${esc(u.status)}</span></td>
+      <td>${pwdTag(u)}</td>
       <td class="muted">${esc(u.last_login_at ? String(u.last_login_at).slice(5, 16) : '未登录')}</td>
-      <td>${u.role === 'ADMIN' ? '' : `<button class="danger" data-del="${u.id}">停用</button>`}</td>
+      <td><button data-pwd="${u.id}">下发初始密码</button>
+        ${u.role === 'ADMIN' ? '' : `<button class="danger" data-del="${u.id}">停用</button>`}</td>
     </tr>`).join('')}</tbody></table>
-    <p class="hint">初始密码 123456，员工首次登录后可在 APP 内修改。</p>
+    <p class="hint">登录方式：手机号 + 初始密码。管理员在此下发初始密码并告知本人，
+      员工首次登录后可自行修改，也可以选择暂时保留。</p>
+    ${pwdResultHtml()}
   </section>`;
 }
+
+function pwdTag(u) {
+  const s = u.password_state || (u.has_password ? 'CHANGED' : 'NONE');
+  if (s === 'NONE') return '<span class="tag err">未设置</span>';
+  if (s === 'INITIAL') return '<span class="tag warn">待修改（初始密码）</span>';
+  return `<span class="tag ok">已改${u.password_updated_at ? ' ' + esc(String(u.password_updated_at).slice(5, 16)) : ''}</span>`;
+}
+
+/** 下发结果面板：明文初始密码只在此处出现一次，刷新即消失 */
+function pwdResultHtml() {
+  const r = state._pwdResult;
+  if (!r || !r.length) return '';
+  return `<section><header><h2>初始密码（仅本次显示）</h2><span class="spacer"></span>
+      <button id="e-pwd-close" style="width:auto">关闭</button></header>
+    <table><thead><tr><th>手机号</th><th>姓名</th><th>初始密码</th></tr></thead>
+    <tbody>${r.map((i) => `<tr><td>${esc(i.phone)}</td><td>${esc(i.name || '')}</td>
+      <td><code>${esc(i.initial_password)}</code></td></tr>`).join('')}</tbody></table>
+    <p class="hint">请截图后逐一通知本人，关闭后将无法再次查看明文。</p></section>`;
+}
+
 function bindEmployees() {
   $('#e-add').addEventListener('click', async () => {
     try {
-      await api('POST', '/api/admin/employees', {
+      const r = await api('POST', '/api/admin/employees', {
         phone: $('#e-phone').value.trim(), name: $('#e-name').value.trim(),
         role: $('#e-role').value, machineCode: $('#e-machine').value || null,
+        password: $('#e-pwd').value.trim() || undefined,
       });
-      toast('已授权，该手机号现在可以登录 APP', 'ok'); render();
+      state._pwdResult = [{ phone: r.phone, name: $('#e-name').value.trim(), initial_password: r.initial_password }];
+      toast(`已授权，初始密码 ${r.initial_password}`, 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   });
+  const closeBtn = $('#e-pwd-close');
+  if (closeBtn) closeBtn.addEventListener('click', () => { state._pwdResult = null; render(); });
+  $('#e-init-all').addEventListener('click', async () => {
+    const pwd = prompt('统一下发的初始密码（留空则每人随机生成 6 位数字）：') ?? '';
+    try {
+      const r = await api('POST', '/api/admin/employees/init-passwords', { password: pwd.trim() || undefined });
+      state._pwdResult = r.items; toast(`已为 ${r.count} 名员工下发初始密码`, 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $$('[data-pwd]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r = await api('POST', `/api/admin/employees/${b.dataset.pwd}/password`, {});
+      state._pwdResult = [r]; toast(`已下发初始密码 ${r.initial_password}`, 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  }));
   $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
     try { await api('DELETE', `/api/admin/employees/${b.dataset.del}`); toast('已停用', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }

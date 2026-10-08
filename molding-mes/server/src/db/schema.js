@@ -57,6 +57,10 @@ export const TABLES = [
       ['phone', 'STR', 32],
       ['name', 'STR', 64],
       ['password_hash', 'STR', 255, null, true],
+      /** 管理员下发的初始密码：员工首次登录后可自行修改，也可选择保留 */
+      ['must_change_password', 'BOOL', null, 0],
+      /** 员工最后一次自行改密码的时间；为空表示仍在使用管理员下发的初始密码 */
+      ['password_updated_at', 'DT', null, null, true],
       ['role', 'STR', 24, 'PRODUCTION'],
       ['status', 'STR', 20, 'ACTIVE'],
       /** 生产人员可绑定机台，也可不绑定（NULL 表示接收全部机台消息） */
@@ -517,6 +521,16 @@ export function createTableSql(table, dialect) {
   // SQLite：唯一/普通索引单独建
   const ddl = `CREATE TABLE IF NOT EXISTS \`${table.name}\` (\n  ${cols.join(',\n  ')}\n);`;
   return ddl;
+}
+
+/**
+ * 增量补列：ALTER TABLE ... ADD COLUMN <列定义>
+ * 用于「表已存在但新增了列」的升级场景（migrate 的 CREATE TABLE IF NOT EXISTS 不会改已有表）。
+ */
+export function addColumnSql(table, col, dialect) {
+  const isMysql = dialect === 'mysql';
+  const types = isMysql ? MYSQL_TYPE : SQLITE_TYPE;
+  return `ALTER TABLE \`${table.name}\` ADD COLUMN ${colSql(col, types, isMysql)};`;
 }
 
 export function createIndexSql(table, dialect) {

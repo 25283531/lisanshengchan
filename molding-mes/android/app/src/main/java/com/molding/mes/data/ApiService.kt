@@ -11,17 +11,15 @@ interface ApiService {
     @POST("api/auth/login")
     suspend fun login(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<LoginData>
 
-    @POST("api/auth/sms/send")
-    suspend fun sendSms(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<Map<String, Any?>>
-
-    @POST("api/auth/sms/login")
-    suspend fun loginSms(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<LoginData>
-
     @GET("api/auth/me")
     suspend fun me(): ApiResp<MeData>
 
     @POST("api/auth/password")
-    suspend fun changePassword(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<Unit>
+    suspend fun changePassword(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<Map<String, Any?>>
+
+    /** 暂不修改：保留管理员下发的初始密码，只关闭本次提醒 */
+    @POST("api/auth/password/later")
+    suspend fun keepInitialPassword(@Body body: Map<String, @JvmSuppressWildcards Any?>): ApiResp<Map<String, Any?>>
 
     @GET("api/notifications")
     suspend fun notifications(

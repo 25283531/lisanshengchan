@@ -1,14 +1,15 @@
 /**
  * 登录与身份。
- * 关键约束：**只有管理员录入过的手机号才能登录**——未授权的手机号一律拒绝，
- * 并提示联系本公司管理员，避免任何人拿到 APP 就能进系统。
+ * 关键约束：
+ *  1. **只有管理员录入过的手机号才能登录**——未授权的手机号一律拒绝，
+ *     并提示联系本公司管理员，避免任何人拿到 APP 就能进系统。
+ *  2. **只认手机号 + 密码**：v3.4 起短信验证码登录下线，改为管理员下发初始密码，
+ *     员工凭「手机号 + 初始密码」登录，登录后可自行决定是否修改。
  */
 import { wrap, ok, fail, AppError } from '../lib/http.js';
-import { signJwt, verifyPassword, hashPassword, makeCode } from '../lib/auth.js';
+import { signJwt, verifyPassword, hashPassword } from '../lib/auth.js';
 import { nowStr, toDate } from '../lib/util.js';
 import { permissionsOf, roleZh, ROLES } from '../lib/rbac.js';
-
-const smsCodes = new Map(); // phone -> { code, exp }
 
 export default function registerAuthRoutes(app, db, ctx) {
   const { requireUser } = ctx;
@@ -29,6 +30,11 @@ export default function registerAuthRoutes(app, db, ctx) {
         id: tenant.id, code: tenant.code, name: tenant.name,
         expires_at: tenant.expires_at, max_users: tenant.max_users,
       },
+      /** 仍在使用管理员下发的初始密码：客户端弹窗提示，员工可自行选择是否修改 */
+      must_change_password: !!user.must_change_password,
+      password_hint: user.must_change_password
+        ? '当前使用的是管理员下发的初始密码，建议修改为本人密码'
+        : null,
     };
   };
 
@@ -78,39 +84,18 @@ export default function registerAuthRoutes(app, db, ctx) {
     };
   };
 
-  /* ------------------------------ 密码登录 ------------------------------ */
+  /* ------------------------ 手机号 + 密码登录 ------------------------ */
   app.post('/api/auth/login', wrap(async (req) => {
     const { phone, password, tenantCode } = req.body || {};
     if (!phone || !password) return fail('手机号与密码不能为空', 'PARAM_MISSING', 400);
     const row = pickTenant(await locate(String(phone).trim(), tenantCode), tenantCode);
     const tenant = guardTenant(row);
-    if (!row.password_hash) return fail('该账号尚未设置密码，请使用验证码登录', 'NO_PASSWORD', 400);
-    if (!verifyPassword(String(password), row.password_hash)) return fail('手机号或密码不正确', 'BAD_CREDENTIALS', 401);
-    return ok(await issue(row, tenant), '登录成功');
-  }));
-
-  /* --------------------------- 验证码（演示） --------------------------- */
-  app.post('/api/auth/sms/send', wrap(async (req) => {
-    const { phone, tenantCode } = req.body || {};
-    if (!phone) return fail('手机号不能为空', 'PARAM_MISSING', 400);
-    const rows = await locate(String(phone).trim(), tenantCode);
-    if (!rows.length) return fail('该手机号尚未获得授权，请联系贵公司管理员录入', 'NOT_AUTHORIZED', 403);
-    const code = makeCode();
-    smsCodes.set(String(phone).trim(), { code, exp: Date.now() + 5 * 60000 });
-    const demo = process.env.NODE_ENV !== 'production';
-    return ok({ sent: true, /** 演示模式直接返回验证码，生产需接短信网关后删除 */ demo_code: demo ? code : undefined },
-      '验证码已发送');
-  }));
-
-  app.post('/api/auth/sms/login', wrap(async (req) => {
-    const { phone, code, tenantCode } = req.body || {};
-    const key = String(phone || '').trim();
-    const rec = smsCodes.get(key);
-    if (!rec || rec.exp < Date.now()) return fail('验证码不存在或已过期', 'CODE_EXPIRED', 400);
-    if (String(rec.code) !== String(code)) return fail('验证码不正确', 'CODE_WRONG', 400);
-    smsCodes.delete(key);
-    const row = pickTenant(await locate(key, tenantCode), tenantCode);
-    const tenant = guardTenant(row);
+    if (!row.password_hash) {
+      return fail('该账号尚未设置初始密码，请联系贵公司管理员在后台设置', 'NO_PASSWORD', 403);
+    }
+    if (!verifyPassword(String(password), row.password_hash)) {
+      return fail('手机号或密码不正确', 'BAD_CREDENTIALS', 401);
+    }
     return ok(await issue(row, tenant), '登录成功');
   }));
 
@@ -122,22 +107,42 @@ export default function registerAuthRoutes(app, db, ctx) {
       id: user.id, phone: user.phone, name: user.name, role: user.role,
       role_zh: roleZh(user.role), machine_code: user.machine_code,
       permissions: permissionsOf(user.role),
+      must_change_password: !!user.must_change_password,
+      password_updated_at: user.password_updated_at || null,
       tenant: { id: tenant.id, code: tenant.code, name: tenant.name, expires_at: tenant.expires_at, max_users: tenant.max_users },
       roles_available: Object.entries(ROLES).map(([k, v]) => ({ role: k, zh: v.zh, desc: v.desc })),
     });
   }));
 
   /* ------------------------------ 修改密码 ------------------------------ */
+  /** 员工自行修改密码：改完即视为已接管账号，不再提示修改 */
   app.post('/api/auth/password', wrap(async (req) => {
     const user = requireUser(req);
     const { oldPassword, newPassword } = req.body || {};
-    if (!newPassword || String(newPassword).length < 6) return fail('新密码至少 6 位', 'WEAK_PASSWORD', 400);
-    if (user.password_hash && !verifyPassword(String(oldPassword || ''), user.password_hash)) {
-      return fail('原密码不正确', 'BAD_CREDENTIALS', 400);
+    const np = String(newPassword || '');
+    if (np.length < 6) return fail('新密码至少 6 位', 'WEAK_PASSWORD', 400);
+    if (user.password_hash) {
+      if (!verifyPassword(String(oldPassword || ''), user.password_hash)) {
+        return fail('原密码不正确', 'BAD_CREDENTIALS', 400);
+      }
+      if (verifyPassword(np, user.password_hash)) {
+        return fail('新密码不能与当前密码相同', 'SAME_PASSWORD', 400);
+      }
     }
-    await db.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
-      [hashPassword(String(newPassword)), nowStr(), user.id]);
-    return ok(null, '密码已修改');
+    await db.run(
+      `UPDATE users SET password_hash = ?, must_change_password = 0, password_updated_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [hashPassword(np), nowStr(), nowStr(), user.id],
+    );
+    return ok({ must_change_password: false }, '密码已修改，下次登录请使用新密码');
+  }));
+
+  /** 暂不修改：保留管理员下发的初始密码，只关掉本次提醒 */
+  app.post('/api/auth/password/later', wrap(async (req) => {
+    const user = requireUser(req);
+    if (!user.must_change_password) return ok({ must_change_password: false }, '无需处理');
+    await db.run('UPDATE users SET must_change_password = 0, updated_at = ? WHERE id = ?', [nowStr(), user.id]);
+    return ok({ must_change_password: false }, '已保留初始密码，可在「我的 · 修改密码」随时更改');
   }));
 
   /** 平台超管：用口令换取平台令牌（仅用于创建公司与调整授权） */

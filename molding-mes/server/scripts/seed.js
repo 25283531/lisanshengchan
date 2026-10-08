@@ -186,7 +186,7 @@ async function main() {
   for (const [k, v] of Object.entries(seeded)) {
     console.log(`  ${k.padEnd(14)} ${v.code === 0 ? `导入 ${v.data?.ids?.length ?? 0} 条` : v.message}`);
   }
-  console.log('\n账号（密码统一 123456）：');
+  console.log('\n账号（初始密码统一 123456，首次登录可自选是否修改）：');
   console.log(`  ${ADMIN.phone}  ${ADMIN.name}  公司管理员`);
   for (const e of EMPLOYEES) console.log(`  ${e.phone}  ${e.name}  ${e.role}${e.machineCode ? `（绑定机台 ${e.machineCode}）` : '（未绑定机台）'}`);
   console.log('\n已开通小程序（密码 123456，开发模式可用手机号直登）：');

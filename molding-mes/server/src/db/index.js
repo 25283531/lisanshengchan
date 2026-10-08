@@ -13,7 +13,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import config from '../config.js';
-import { TABLES, createTableSql, createIndexSql } from './schema.js';
+import { TABLES, createTableSql, createIndexSql, addColumnSql } from './schema.js';
 
 const txStore = new AsyncLocalStorage();
 
@@ -148,7 +148,46 @@ export async function createDb(opts = {}) {
   return driver;
 }
 
-/** 建表（幂等）。返回执行结果统计。 */
+/** 读取某张表现有的列名；表不存在返回 null。 */
+async function existingColumns(db, table) {
+  if (db.dialect === 'sqlite') {
+    const rows = await db.query(`PRAGMA table_info(\`${table}\`)`);
+    if (!rows.length) return null;
+    return new Set(rows.map((r) => r.name));
+  }
+  let rows;
+  try {
+    rows = await db.query(`SHOW COLUMNS FROM \`${table}\``);
+  } catch {
+    return null; // 表不存在
+  }
+  return new Set(rows.map((r) => r.Field));
+}
+
+/**
+ * 增量补列：把 schema 里新增的列补进已存在的表。
+ * 只补「表里没有、schema 里有」的列，不动已有列，也不删列，可安全重复执行。
+ */
+export async function syncColumns(db) {
+  const added = [];
+  for (const table of TABLES) {
+    const has = await existingColumns(db, table.name);
+    if (!has) continue; // 表还没建，交给 migrate 的 CREATE TABLE
+    for (const col of table.cols) {
+      if (col[1] === 'PK') continue;
+      if (has.has(col[0])) continue;
+      try {
+        await db.exec(addColumnSql(table, col, db.dialect));
+        added.push(`${table.name}.${col[0]}`);
+      } catch (e) {
+        added.push(`${table.name}.${col[0]}（失败：${e.message}）`);
+      }
+    }
+  }
+  return added;
+}
+
+/** 建表（幂等）+ 增量补列。返回执行结果统计。 */
 export async function migrate(db) {
   const dialect = db.dialect;
   let created = 0;
@@ -157,7 +196,8 @@ export async function migrate(db) {
     for (const ix of createIndexSql(table, dialect)) await db.exec(ix);
     created += 1;
   }
-  return { dialect, tables: created };
+  const added = await syncColumns(db);
+  return { dialect, tables: created, added_columns: added };
 }
 
 /** 删库跑路（仅用于演示重置） */
