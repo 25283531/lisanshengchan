@@ -197,7 +197,7 @@ private fun BossBlock(master: MasterData?, tasks: List<ScheduleTask>) {
         }
         (shortMats + shortLabels).take(5).forEach { s ->
             Text(
-                "· ${s.get("name")?.takeIf { it.isJsonPrimitive }?.asString ?: s.get("sku")?.takeIf { it.isJsonPrimitive }?.asString ?: "-"}　库存 ${jdouble(s, "stock_qty").fmt()} ${s.get("unit")?.takeIf { it.isJsonPrimitive }?.asString ?: ""} / 安全 ${jdouble(s, "safety_stock").fmt()}",
+                "· ${s.get("name")?.takeIf { it.isJsonPrimitive }?.asString ?: s.get("sku")?.takeIf { it.isJsonPrimitive }?.asString ?: "-"}　库存 ${fmt(jdouble(s, "stock_qty"))} ${s.get("unit")?.takeIf { it.isJsonPrimitive }?.asString ?: ""} / 安全 ${fmt(jdouble(s, "safety_stock"))}",
                 fontSize = 12.sp, color = Err,
             )
         }
@@ -298,8 +298,6 @@ private fun MiniStat2(label: String, value: String, modifier: Modifier = Modifie
 
 private fun jdouble(o: JsonObject, key: String): Double =
     o.get(key)?.takeIf { it.isJsonPrimitive }?.asDouble ?: 0.0
-
-private fun Double.fmt(): String = if (this % 1.0 == 0.0) toLong().toString() else String.format("%.2f", this)
 
 @Composable
 private fun ShiftBlock(items: List<ShiftItem>) {
