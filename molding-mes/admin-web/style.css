@@ -98,3 +98,6 @@ ul.check li{padding:3px 0;font-size:13px}
 /* 登录时"该手机号属于多家公司"的公司选择按钮 */
 .tenant-pick{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .tenant-pick button{width:auto;padding:6px 12px;font-size:13px}
+
+/* 顶栏：该手机号还在其他公司时的提示 */
+.tenant-alt{font-size:12px;color:var(--ink2);margin-right:8px}

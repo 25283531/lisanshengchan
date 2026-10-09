@@ -7,6 +7,7 @@ import { hashPassword } from '../lib/auth.js';
 import { nowStr, toStr, num, randomPassword } from '../lib/util.js';
 import { audit } from '../lib/repo.js';
 import { readGlobalAi, publicView, envAiConfig, testAiConnection } from '../domain/ai-config.js';
+import { readLogs, logStats } from '../lib/logbuf.js';
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
@@ -278,6 +279,22 @@ export default function registerPlatformRoutes(app, db, ctx) {
         [okFlag ? 1 : 0, msg, nowStr(), g.id]);
     });
     return ok(r);
+  }));
+
+  /**
+   * 运行日志：直接读服务端内存里的环形缓冲（最新 500 条），省掉 SSH + docker logs。
+   * level 传 warn / error 可只看告警及以上。
+   */
+  app.get('/api/platform/logs', wrap(async (req) => {
+    requirePlatform(req);
+    const q = req.query || {};
+    const limit = Math.min(Number(q.limit || 200), 500);
+    const level = q.level ? String(q.level) : null;
+    return ok({
+      log_level: ctx.config.logLevel,
+      stats: logStats(),
+      items: readLogs({ limit, level }),
+    });
   }));
 
   app.get('/api/platform/stats', wrap(async (req) => {

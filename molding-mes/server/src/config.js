@@ -42,6 +42,12 @@ function readVersion() {
 export const config = {
   env: process.env.NODE_ENV || 'development',
   version: readVersion(),
+  /**
+   * 日志级别：trace / debug / info / warn / error / fatal。
+   * 生产默认 info（后台「运行日志」页与 docker logs 都要能看出在干什么）；
+   * 嫌请求日志太吵可设 LOG_LEVEL=warn。
+   */
+  logLevel: (process.env.LOG_LEVEL || 'info').toLowerCase(),
   port: num(process.env.PORT, 8080),
   host: process.env.HOST || '0.0.0.0',
 

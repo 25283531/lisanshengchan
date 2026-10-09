@@ -13,7 +13,7 @@ android {
         minSdk = 26          // Android 8.0+，覆盖绝大多数工业平板与手机
         targetSdk = 34
         versionCode = 13
-        versionName = "3.7.0"
+        versionName = "3.7.1"
 
         // 服务端地址：正式环境 https://zs.250886.xyz/
         // 车间内网调试可在 APP「我的」页临时改成 http://192.168.x.x:8080/（仅保存在本机）

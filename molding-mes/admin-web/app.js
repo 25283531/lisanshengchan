@@ -42,8 +42,10 @@ $('#btn-login').addEventListener('click', async () => {
   try {
     const d = await api('POST', '/api/auth/login', {
       phone: $('#lg-phone').value.trim(), password: $('#lg-pwd').value,
+      // 公司编码可留空：服务端会自动选公司，填了才按编码/名称切过去
       tenantCode: $('#lg-code').value.trim() || undefined,
     });
+    state.otherTenants = d.other_tenants || [];
     state.token = d.token; state.user = d.user; state.tenant = d.tenant; state.platform = false;
     boot();
   } catch (e) { showLoginError(e); }
@@ -93,12 +95,20 @@ const NAV_PF = [
   { id: 'tenants', name: '公司注册与授权' },
   { id: 'pfai', name: 'AI 接口配置' },
   { id: 'stats', name: '平台统计' },
+  { id: 'logs', name: '运行日志' },
 ];
 
 function boot() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#who-name').textContent = `${state.user.name}（${state.user.role}）`;
+  const alt = $('#tenant-alt');
+  if (!state.platform && state.otherTenants && state.otherTenants.length) {
+    alt.textContent = `当前 ${state.tenant.code}；该手机号还在 ${state.otherTenants.map((t) => t.name).join('、')}，切换请在登录页填公司编码`;
+    alt.classList.remove('hidden');
+  } else {
+    alt.classList.add('hidden');
+  }
   const navs = state.platform ? NAV_PF : NAV.filter((n) => state.user.role === 'ADMIN' || !['employees', 'wx', 'ai'].includes(n.id));
   $('#nav').innerHTML = navs.map((n) => `<button data-v="${n.id}">${n.name}</button>`).join('');
   $$('#nav button').forEach((b) => b.addEventListener('click', () => go(b.dataset.v)));
@@ -113,7 +123,7 @@ async function render() {
   const m = $('#main');
   m.innerHTML = '<section><h2>加载中…</h2></section>';
   try {
-    const fn = { overview, employees, wx: wxAccess, master, ai, schedule, orders, chat, notifications, tenants, pfai, stats }[state.view];
+    const fn = { overview, employees, wx: wxAccess, master, ai, schedule, orders, chat, notifications, tenants, pfai, stats, logs: logsView }[state.view];
     m.innerHTML = await fn();
     if (state.view === 'master') bindMaster();
     if (state.view === 'employees') bindEmployees();
@@ -124,6 +134,7 @@ async function render() {
     if (state.view === 'orders') bindOrders();
     if (state.view === 'chat') bindChat();
     if (state.view === 'tenants') bindTenants();
+    if (state.view === 'logs') bindLogs();
   } catch (e) {
     m.innerHTML = `<section><h2>加载失败</h2><p class="err">${esc(e.message)}</p></section>`;
   }
@@ -1101,6 +1112,52 @@ function tenantResultHtml() {
     <tbody><tr><td>${esc(r.code ? `${r.name}（${r.code}）` : r.name)}</td>
       <td>${esc(r.phone || '')}</td><td><code>${esc(r.password || '')}</code></td>
       <td class="muted">${esc(r.tip || '')}</td></tr></tbody></table></section>`;
+}
+
+/* --------------------------- 平台：运行日志 --------------------------- */
+/**
+ * 直接读服务端内存里的日志环形缓冲（最新 500 条），不必 SSH 敲 docker logs。
+ * 落盘那份仍由 compose 的 json-file 管（10m × 3），两者互补：这里看最近，落盘查历史。
+ */
+async function logsView() {
+  const lv = state.logFilter || '';
+  const d = await api('GET', `/api/platform/logs?limit=200${lv ? `&level=${lv}` : ''}`);
+  const items = d.items || [];
+  return `
+  <section><header><h2>运行日志</h2><span class="spacer"></span>
+    <span class="muted">级别 ${esc(d.log_level)} · 缓冲 ${d.stats?.kept || 0}/${d.stats?.max || 0} 条（仅最近）</span>
+    <button id="lg-refresh" style="width:auto">刷新</button>
+    <button id="lg-all" style="width:auto" class="${lv ? '' : 'primary'}">全部</button>
+    <button id="lg-warn" style="width:auto" class="${lv === 'warn' ? 'primary' : ''}">只看告警</button>
+    <button id="lg-err" style="width:auto" class="${lv === 'error' ? 'primary' : ''}">只看错误</button>
+  </header>
+    <table><thead><tr><th>时间</th><th>级别</th><th>内容</th><th class="num">状态</th><th>请求</th></tr></thead>
+    <tbody>${items.map((r) => `<tr>
+      <td class="muted">${esc(fmtLogTime(r.time))}</td>
+      <td><span class="tag ${r.level === 'error' || r.level === 'fatal' ? 'err' : r.level === 'warn' ? 'warn' : ''}">${esc(r.level)}</span></td>
+      <td style="white-space:pre-wrap">${esc(r.msg)}</td>
+      <td class="num">${r.status ?? ''}</td>
+      <td class="muted">${esc(r.req_id || '')}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">暂无日志（服务刚重启或日志级别过高）</td></tr>'}</tbody></table>
+    <p class="hint">要查更早的日志请到服务器上看落盘文件：
+      <code>cd /data/mes &amp;&amp; docker compose logs --tail=200 mes-server</code>；
+      日志级别由环境变量 <code>LOG_LEVEL</code> 控制（默认 info）。</p>
+  </section>`;
+}
+function bindLogs() {
+  $('#lg-refresh').addEventListener('click', () => render());
+  $('#lg-all').addEventListener('click', () => { state.logFilter = ''; render(); });
+  $('#lg-warn').addEventListener('click', () => { state.logFilter = 'warn'; render(); });
+  $('#lg-err').addEventListener('click', () => { state.logFilter = 'error'; render(); });
+}
+/** pino 的 time 是毫秒时间戳，也可能是 ISO 串（兜底路径） */
+function fmtLogTime(t) {
+  if (!t) return '';
+  const n = Number(t);
+  const d = Number.isFinite(n) && String(t).length >= 12 ? new Date(n) : new Date(String(t).replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return String(t);
+  const p = (v) => String(v).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 async function stats() {

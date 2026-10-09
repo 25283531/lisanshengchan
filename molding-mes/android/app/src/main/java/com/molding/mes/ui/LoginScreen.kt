@@ -33,11 +33,13 @@ import com.molding.mes.data.Session
 import kotlinx.coroutines.launch
 
 /**
- * 登录页：手机号 + 密码。
+ * 登录页：手机号 + 密码（公司编码可留空）。
  *
- * 两条硬规则：
- *  1. 只有公司管理员在后台录入过的手机号才能登录，未授权的号码会收到明确报错。
- *  2. 密码由管理员下发（初始密码），首次登录成功后 APP 提示是否修改，**员工可自行选择**：
+ * 三条硬规则：
+ *  1. **公司编码不必填**：只填手机号 + 密码即可登录；挂在多家公司时由服务端自动选一家，
+ *     需要切到另一家再填公司编码（编码或公司名称都认）。
+ *  2. 只有公司管理员在后台录入过的手机号才能登录，未授权的号码会收到明确报错。
+ *  3. 密码由管理员下发（初始密码），首次登录成功后 APP 提示是否修改，**员工可自行选择**：
  *     改则输入新密码，不改则点「以后再说」保留初始密码，后续可在「我的」页随时修改。
  */
 @Composable
@@ -70,10 +72,6 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
 
         Column(Modifier.padding(top = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
-                value = tenantCode, onValueChange = { tenantCode = it },
-                label = { Text("公司编码") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
                 value = phone, onValueChange = { phone = it },
                 label = { Text("手机号") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
@@ -81,6 +79,13 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                 value = password, onValueChange = { password = it },
                 label = { Text("密码") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = PasswordVisualTransformation(),
+            )
+            // 公司编码可留空：服务端会按「管理员身份 → 最近登录 → 公司 ID」自动选公司，
+            // 只有一个手机号挂多家公司、且要切到非默认那家时才需要填。
+            OutlinedTextField(
+                value = tenantCode, onValueChange = { tenantCode = it },
+                label = { Text("公司编码（可留空）") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                supportingText = { Text("通常不必填；一个手机号有多家公司时才用来切换") },
             )
 
             Button(

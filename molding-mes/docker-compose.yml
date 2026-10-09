@@ -26,6 +26,8 @@ services:
       DB_USER: mes
       DB_PASSWORD: mes123456
       DB_NAME: molding_mes
+      # 日志级别：info（默认）。后台「运行日志」页与 docker logs 都能看到请求与关键动作
+      LOG_LEVEL: info
       OPTIMIZER_ENABLED: "true"
       OPTIMIZER_URL: http://optimizer:8090
       SERVE_ADMIN_WEB: "true"

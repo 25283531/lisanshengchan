@@ -63,6 +63,31 @@ gunzip < /data/mes/backup/mes-2026-10-08.sql.gz \
 
 建议用系统 crontab 每天 03:00 备份，并保留 14 天。
 
+## 4.5 日志：级别与查看方式（v3.7.1）
+
+服务端日志级别由环境变量 `LOG_LEVEL` 控制，**默认 `info`**（compose 里已显式写上）：
+
+```yaml
+services:
+  server:
+    environment:
+      LOG_LEVEL: info      # trace / debug / info / warn / error / fatal
+```
+
+三处看日志，按场景选：
+
+| 场景 | 方式 |
+|---|---|
+| 日常看最近发生了什么 | 平台后台 → **运行日志**（读服务端内存环形缓冲，最新 500 条，可按 warn / error 过滤） |
+| 查更早的历史 | 服务器 `cd /data/mes && docker compose logs --tail=200 mes-server` |
+| 实时跟踪 | `docker compose logs -f --tail=50 mes-server` |
+
+落盘由 compose 的 `logging` 段限制（json-file，`max-size: 10m` × `max-file: 3`），
+**不会撑爆系统盘**；内存缓冲只保留 500 条，服务重启即清空，两者互补。
+
+嫌每个请求两条日志太吵：把 `LOG_LEVEL` 改成 `warn` 再 `docker compose up -d`；
+排障时临时改 `debug`，查完改回 `info`。
+
 ## 5. 运维要点
 
 - **时区**：容器 `TZ=Asia/Shanghai` 且 MySQL `--default-time-zone=+08:00`，两端必须一致；业务时间字段以本地口径 `YYYY-MM-DD HH:MM:SS` 字符串存取。

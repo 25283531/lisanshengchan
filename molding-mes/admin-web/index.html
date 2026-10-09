@@ -20,13 +20,14 @@
     </div>
 
     <div id="pane-company" class="pane">
-      <label>公司编码（也可填公司名称）<input id="lg-code" placeholder="DEMO" value="DEMO"></label>
       <label>手机号<input id="lg-phone" placeholder="13800000001" value="13800000001"></label>
       <label>密码<input id="lg-pwd" type="password" placeholder="123456" value="123456"></label>
+      <label class="optional">公司编码（可留空）<input id="lg-code" placeholder="多公司切换时才填"></label>
       <button class="primary" id="btn-login">登录</button>
       <p class="hint">演示账号：13800000001（管理员）/ 13800000002（业务员）… 密码统一 123456。
-        公司编码在平台后台「公司注册与授权」列表里查看；公司<strong>第一个管理员</strong>（平台注册时登记的手机号）
-        无需先授权，用初始密码即可直接登录。</p>
+        <strong>公司编码不必填</strong>：只填手机号 + 密码即可登录；一个手机号挂在多家公司时，
+        系统按「管理员身份 → 最近登录 → 公司 ID」自动选择，需要切换再填公司编码（编码或名称都行）。
+        公司<strong>第一个管理员</strong>（平台注册时登记的手机号）无需先授权，用初始密码即可直接登录。</p>
     </div>
 
     <div id="pane-platform" class="pane hidden">
@@ -45,6 +46,7 @@
     <nav class="nav" id="nav"></nav>
     <div class="who">
       <span id="who-name"></span>
+      <span id="tenant-alt" class="tenant-alt hidden"></span>
       <button class="ghost" id="btn-logout">退出</button>
     </div>
   </header>

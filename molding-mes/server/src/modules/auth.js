@@ -24,7 +24,7 @@ const NOT_AUTHORIZED_MSG =
 export default function registerAuthRoutes(app, db, ctx) {
   const { requireUser } = ctx;
 
-  const issue = async (user, tenant) => {
+  const issue = async (user, tenant, otherTenants = []) => {
     const token = signJwt({ uid: user.id, tid: tenant.id, role: user.role });
     await db.run('UPDATE users SET last_login_at = ? WHERE id = ?', [nowStr(), user.id]);
     return {
@@ -40,6 +40,11 @@ export default function registerAuthRoutes(app, db, ctx) {
         id: tenant.id, code: tenant.code, name: tenant.name,
         expires_at: tenant.expires_at, max_users: tenant.max_users,
       },
+      /**
+       * 该手机号还挂在别的公司（登录没填公司编码时按优先级自动选了一家）。
+       * 客户端可提示"当前在 X 公司"，需要时再带 tenantCode 切过去。
+       */
+      other_tenants: otherTenants,
       /** 仍在使用管理员下发的初始密码：客户端弹窗提示，员工可自行选择是否修改 */
       must_change_password: !!user.must_change_password,
       password_hint: user.must_change_password
@@ -89,20 +94,25 @@ export default function registerAuthRoutes(app, db, ctx) {
           403, 'TENANT_MISMATCH',
         );
       }
-      if (elsewhere.length) {
-        // 该手机号在别的公司被授权过：多半是公司选错，直接把可选项抛给客户端
-        const err = new AppError('该手机号不属于当前公司，请选择要登录的公司', 300, 'MULTI_TENANT');
-        err.extra = { tenants: elsewhere.map((r) => ({ id: r.id, code: r.code, name: r.name })) };
-        throw err;
-      }
       throw new AppError(NOT_AUTHORIZED_MSG, 403, 'NOT_AUTHORIZED');
     }
-    if (rows.length > 1 && !tenantHint) {
-      const err = new AppError('该手机号属于多家公司，请选择要登录的公司', 300, 'MULTI_TENANT');
-      err.extra = { tenants: rows.map((r) => ({ id: r.tenant_id, code: r.tenant_code, name: r.tenant_name })) };
-      throw err;
-    }
+    if (rows.length > 1 && !tenantHint) return pickDefaultTenant(rows);
     return rows[0];
+  };
+
+  /**
+   * 未填公司编码、且该手机号挂在多家公司时自动选一家（v3.7.1：登录不再强制填公司编码）。
+   * 优先级：① 管理员身份 ② 最近登录过 ③ 公司 id 最小——保证结果稳定可预期，
+   * 而不是随机挑一个让用户莫名其妙进了别家。其余公司在响应里以 other_tenants 返回。
+   */
+  const pickDefaultTenant = (rows) => {
+    const roleRank = (r) => (r.role === 'ADMIN' ? 0 : r.role === 'BOSS' ? 1 : r.role === 'PMC' ? 2 : 3);
+    const sorted = [...rows].sort((a, b) => (
+      roleRank(a) - roleRank(b)
+      || String(b.last_login_at || '').localeCompare(String(a.last_login_at || ''))
+      || a.tenant_id - b.tenant_id
+    ));
+    return sorted[0];
   };
 
   /**
@@ -181,7 +191,15 @@ export default function registerAuthRoutes(app, db, ctx) {
     if (!verifyPassword(String(password), row.password_hash)) {
       return fail('手机号或密码不正确', 'BAD_CREDENTIALS', 401);
     }
-    return ok(await issue(row, tenant), '登录成功');
+    // 没填公司编码且该手机号还在别的公司时，把其他公司一并返回，方便提示与切换
+    const others = (!hint && rows.length > 1)
+      ? rows.filter((r) => r.tenant_id !== row.tenant_id)
+        .map((r) => ({ id: r.tenant_id, code: r.tenant_code, name: r.tenant_name, role: r.role }))
+      : [];
+    const data = await issue(row, tenant, others);
+    return ok(data, others.length
+      ? `登录成功（当前公司：${tenant.code}；该手机号还在 ${others.length} 家公司，可在登录时填公司编码切换）`
+      : '登录成功');
   }));
 
   /* -------------------------------- 我的 -------------------------------- */

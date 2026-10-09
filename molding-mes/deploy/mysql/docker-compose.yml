@@ -47,7 +47,7 @@ services:
         max-file: "3"
 
   server:
-    image: ghcr.io/25283531/lisanshengchan-mes-server:v3.7.0
+    image: ghcr.io/25283531/lisanshengchan-mes-server:v3.7.1
     container_name: mes-server
     restart: unless-stopped
     depends_on:
@@ -70,6 +70,9 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD}
       DB_NAME: molding_mes
       DB_POOL: 10
+      # 日志级别：info（默认，后台「运行日志」页与 docker logs 都看得到请求与关键动作）
+      # 嫌请求日志太吵就改 warn；排障时可临时改 debug。改完 docker compose up -d 生效
+      LOG_LEVEL: info
       OPTIMIZER_ENABLED: "true"
       OPTIMIZER_URL: http://mes-optimizer:8090
       SERVE_ADMIN_WEB: "true"
@@ -82,7 +85,7 @@ services:
     logging: *log
 
   optimizer:
-    image: ghcr.io/25283531/lisanshengchan-mes-optimizer:v3.7.0
+    image: ghcr.io/25283531/lisanshengchan-mes-optimizer:v3.7.1
     container_name: mes-optimizer
     restart: unless-stopped
     environment:

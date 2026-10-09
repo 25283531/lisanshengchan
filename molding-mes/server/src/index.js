@@ -6,8 +6,10 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
+import { Writable } from 'node:stream';
 
 import config from './config.js';
+import { pushLog } from './lib/logbuf.js';
 import { createDb, migrate } from './db/index.js';
 import { ensureGlobalAi } from './domain/ai-config.js';
 import { registerAuth, requireUser, requirePerm, tenantIdOf } from './middleware.js';
@@ -33,11 +35,21 @@ export async function buildServer(opts = {}) {
     await ensureGlobalAi(db);
   }
 
-  const app = Fastify({
-    logger: {
-      level: config.env === 'production' ? 'warn' : 'info',
-      transport: undefined,
+  /**
+   * 日志：一份写 stdout（交给 docker 的 json-file 落盘），一份进内存环形缓冲，
+   * 平台后台「运行日志」页直接读缓冲，运维不用 SSH 敲 docker logs。
+   */
+  const logStream = new Writable({
+    write(chunk, _enc, cb) {
+      const s = chunk.toString();
+      try { process.stdout.write(s); } catch { /* stdout 不可写时别把进程拖死 */ }
+      pushLog(s);
+      cb();
     },
+  });
+
+  const app = Fastify({
+    logger: { level: config.logLevel, stream: logStream },
     // 基础数据支持上传 Excel 附件，放开到 10MB
     bodyLimit: 10 * 1024 * 1024,
   });
