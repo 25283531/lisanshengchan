@@ -2,6 +2,13 @@ package com.molding.mes.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.google.gson.JsonToken
+import com.google.gson.TypeAdapter
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonWriter
 import com.molding.mes.BuildConfig
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -126,7 +133,31 @@ object Session {
     val api: ApiService get() = Retrofit.Builder()
         .baseUrl(baseUrl)
         .client(client)
-        .addConverterFactory(GsonConverterFactory.create())
+        .addConverterFactory(GsonConverterFactory.create(gson))
         .build()
         .create(ApiService::class.java)
+
+    /**
+     * Gson 对 JsonObject 字段遇到 JSON null 时会把 JsonNull.INSTANCE 塞进字段，
+     * 后续当成 JsonObject 使用就抛 "Expected a JsonObject but was JsonNull"。
+     * 助手响应里的 data/parsed 经常为 null（候选确认、纯查询场景），这里统一在
+     * 解析层把 null 转成 Kotlin null，UI 侧的可空处理才能正常生效。
+     */
+    private val gson by lazy {
+        GsonBuilder()
+            .registerTypeAdapter(JsonObject::class.java, object : TypeAdapter<JsonObject>() {
+                override fun read(reader: JsonReader): JsonObject? {
+                    if (reader.peek() == JsonToken.NULL) {
+                        reader.nextNull()
+                        return null
+                    }
+                    return JsonParser.parseReader(reader).asJsonObject
+                }
+
+                override fun write(out: JsonWriter, value: JsonObject?) {
+                    if (value == null) out.nullValue() else out.jsonValue(value.toString())
+                }
+            })
+            .create()
+    }
 }

@@ -56,6 +56,26 @@ fun MeScreen(onLogout: () -> Unit) {
             }
         }
 
+        // 我的权限：与服务端 rbac.js 权限矩阵一致，页面里能做什么以这里为准
+        SectionTitle("我的权限")
+        Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val perms = Session.permissions.toList().sorted()
+                if (perms.isEmpty()) {
+                    Text("未获取到权限列表，请重新登录", fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error)
+                } else {
+                    Text(
+                        perms.joinToString(" · ") { PERMISSION_ZH[it] ?: it },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .8f),
+                    )
+                    Text("共 ${perms.size} 项权限，与后台（Web 端）角色配置一致；无权限的操作在页面上不显示。",
+                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+                }
+            }
+        }
+
         SectionTitle("修改密码")
         var oldPwd by remember { mutableStateOf("") }
         var newPwd by remember { mutableStateOf("") }

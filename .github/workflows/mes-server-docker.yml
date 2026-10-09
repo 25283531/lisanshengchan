@@ -19,10 +19,19 @@ on:
         default: ''
   push:
     branches: [main]
+    # 只在服务端/管理后台/求解器有变更时才重建镜像；
+    # 纯安卓改动只会触发 MES Android APK 工作流，不再全量重构。
+    # （paths 过滤不作用于 tags 触发：打 v* 版本标签时照常全量出镜像）
+    paths:
+      - 'molding-mes/server/**'
+      - 'molding-mes/admin-web/**'
+      - 'molding-mes/optimizer/**'
+      - '.github/workflows/mes-server-docker.yml'
     tags: ['v*.*.*']
   pull_request:
     paths:
       - 'molding-mes/server/**'
+      - 'molding-mes/admin-web/**'
       - 'molding-mes/optimizer/**'
       - '.github/workflows/mes-server-docker.yml'
 

@@ -2,6 +2,8 @@ package com.molding.mes.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -33,7 +36,10 @@ import kotlinx.coroutines.launch
 /**
  * 助手页：说一句话就办事。
  * 例：河北的魔辣面筋下 2 万个订单，13 号交货 / 河北麻辣面筋出库 5000 个
+ *
+ * 展示口径与服务端一致：意图 + 置信度 + 解析明细；识别不准的实体列成候选让人确认。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AssistantScreen() {
     val scope = rememberCoroutineScope()
@@ -70,7 +76,8 @@ fun AssistantScreen() {
     ) {
         SectionTitle("说一句话就办事")
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // FlowRow：示例多的时候自动换行，不再横向挤成一团或溢出屏幕
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             samples.forEach { s ->
                 AssistChip(onClick = { text = s; send(s) }, label = { Text(s, fontSize = 11.sp) })
             }
@@ -82,47 +89,25 @@ fun AssistantScreen() {
             modifier = Modifier.fillMaxWidth(), minLines = 2,
         )
 
-        Button(onClick = { send(text) }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
-            if (loading) CircularProgressIndicator(Modifier.padding(end = 8.dp))
-            Text("发送")
-        }
-
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
-
-        result?.let { r ->
-            Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
-                Column(Modifier.padding(14.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("意图：${r.intent}", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        Tag(if (r.used_fallback) "本地解析" else "AI 解析")
-                    }
-                    Text("置信度 ${String.format("%.2f", r.confidence)}", fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
-                    r.message?.let {
-                        Text(
-                            it, fontSize = 13.sp,
-                            color = if (r.ai_unavailable) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                    if (r.degraded && !r.ai_unavailable) {
-                        Text(
-                            "提示：本次为本地解析（AI 未参与），仅支持下单 / 出库 / 报工 / 库存 / 设备状态。",
-                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f),
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    if (r.needs_confirm && r.candidates.isNotEmpty()) {
-                        Text("需要从以下候选中确认：", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 8.dp))
-                        r.candidates.forEach { c ->
-                            Text("· ${c.get("field")?.asString}：${c.get("input")?.asString ?: "（未识别）"}", fontSize = 12.sp)
-                        }
-                    }
-                }
+        Button(onClick = { send(text) }, modifier = Modifier.fillMaxWidth(), enabled = !loading && text.isNotBlank()) {
+            if (loading) {
+                CircularProgressIndicator(Modifier.padding(end = 8.dp))
+                Text("AI 解析中…")
+            } else {
+                Text("发送")
             }
         }
+
+        error?.let {
+            Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(0.dp)) {
+                Text(
+                    it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
+
+        result?.let { r -> ChatResultCard(r) }
 
         Text(
             "语义解析优先调用 AI，AI 不可用时仅下单 / 出库 / 报工 / 库存 / 设备状态可本地兜底；" +
@@ -130,4 +115,95 @@ fun AssistantScreen() {
             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f)
         )
     }
+}
+
+/** 解析结果卡片：意图、置信度、解析明细、待确认候选 */
+@Composable
+private fun ChatResultCard(r: ChatResult) {
+    Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(intentZh(r.intent), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Tag(
+                    if (r.ai_unavailable) "AI 不可用"
+                    else if (r.degraded || r.used_fallback) "本地解析"
+                    else "AI 解析",
+                    if (r.ai_unavailable) com.molding.mes.ui.theme.Err else levelColor("OK"),
+                )
+            }
+            Text("置信度 ${String.format("%.2f", r.confidence)}", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+
+            r.message?.let {
+                HorizontalDivider()
+                Text(
+                    it, fontSize = 13.sp,
+                    color = if (r.ai_unavailable) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+
+            // 解析明细：字段中文名 + 值，让用户看清 AI 到底理解成了什么
+            r.parsed?.let { p ->
+                if (r.needs_confirm) return@let
+                HorizontalDivider()
+                ParsedRow("产品", p.get("product"))
+                ParsedRow("客户", p.get("customer"))
+                ParsedRow("原料", p.get("material"))
+                ParsedRow("数量", p.get("quantity"))
+                ParsedRow("单位", p.get("unit"))
+                ParsedRow("交期", p.get("due_date"))
+                p.get("note")?.takeIf { it.isJsonPrimitive && !it.asString.isBlank() }?.let {
+                    Text(it.asString, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f))
+                }
+            }
+
+            if (r.needs_confirm && r.candidates.isNotEmpty()) {
+                HorizontalDivider()
+                Text("请补充或确认：", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                r.candidates.forEach { c ->
+                    Text(
+                        "· ${candidateFieldZh(c.get("field")?.takeIf { it.isJsonPrimitive }?.asString)}：${c.get("input")?.takeIf { it.isJsonPrimitive && it.asString.isNotBlank() }?.asString ?: "（未识别）"}",
+                        fontSize = 12.sp,
+                    )
+                }
+                Text("可在上方补充说明后重新发送，例如写全产品名称。", fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .5f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ParsedRow(label: String, value: com.google.gson.JsonElement?) {
+    val v = value?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() } ?: return
+    Text("$label：$v", fontSize = 13.sp)
+}
+
+/** 意图 → 中文 */
+private fun intentZh(i: String): String = when (i) {
+    "CREATE_ORDER" -> "创建订单"
+    "UPDATE_ORDER" -> "修改订单"
+    "OUTBOUND" -> "成品出库"
+    "PROGRESS" -> "生产报工"
+    "QUERY_STOCK" -> "库存查询"
+    "QUERY_SCHEDULE" -> "排产查询"
+    "QUERY_PROGRESS" -> "进度查询"
+    "MACHINE_STATUS" -> "设备状态"
+    "MASTER_CREATE" -> "建档"
+    "MASTER_UPDATE" -> "改台账"
+    "MAINTENANCE_PLAN" -> "维修保养"
+    "UNKNOWN" -> "未识别"
+    else -> i
+}
+
+/** 候选字段 → 中文 */
+private fun candidateFieldZh(f: String?): String = when (f) {
+    "product" -> "产品"
+    "customer" -> "客户"
+    "material" -> "原料"
+    "machine" -> "机台"
+    "mold" -> "模具"
+    else -> f ?: "实体"
 }

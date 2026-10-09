@@ -23,15 +23,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.gson.JsonObject
 import com.molding.mes.data.MaterialGroup
 import com.molding.mes.data.NotificationItem
+import com.molding.mes.data.OrderItem
 import com.molding.mes.data.Repo
+import com.molding.mes.data.ScheduleTask
 import com.molding.mes.data.Session
 import com.molding.mes.data.ShiftItem
+import com.molding.mes.ui.theme.Err
+import com.molding.mes.ui.theme.Ok
+import com.molding.mes.ui.theme.Warn
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 首页：按角色展示各自最关心的内容 + 最新消息。
- * 所有角色都能从这里进入订单与设备页（提交类操作由服务端权限控制，页面内会自行隐藏）。
+ * 内容分组与 Web 端（Docker 后台）的权限矩阵保持一致：
+ *   BOSS 老板 → 库存概览 + 生产实况；PMC → 排产与交期风险；SALES → 订单概况；
+ *   PRODUCTION → 当班任务；MIXER/WAREHOUSE → 配料计划；TECHNICIAN → 设备提醒。
+ * 提交类操作仍由服务端权限（permissions）控制，页面内按 Session.can() 显隐。
  */
 @Composable
 fun HomeScreen(
@@ -45,6 +57,9 @@ fun HomeScreen(
     var shift by remember { mutableStateOf<List<ShiftItem>>(emptyList()) }
     var materials by remember { mutableStateOf<List<MaterialGroup>>(emptyList()) }
     var notes by remember { mutableStateOf<List<NotificationItem>>(emptyList()) }
+    var orders by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
+    var tasks by remember { mutableStateOf<List<ScheduleTask>>(emptyList()) }
+    var master by remember { mutableStateOf<JsonObject?>(null) }
     var unread by remember { mutableStateOf(0) }
 
     suspend fun load() {
@@ -52,11 +67,27 @@ fun HomeScreen(
         runCatching {
             unread = Repo.unreadCount().getOrDefault(0)
             notes = Repo.notifications(30).getOrDefault(emptyList())
-            when (role) {
-                "PRODUCTION" -> shift = Repo.shift(12).getOrNull()?.items ?: emptyList()
-                "MIXER", "WAREHOUSE" -> materials = Repo.materials().getOrNull()?.items ?: emptyList()
-                "TECHNICIAN" -> notes = Repo.notifications(30, type = null).getOrDefault(emptyList())
-                else -> Unit
+            when {
+                // 当班任务：生产人员
+                Session.can("order.read") && role == "PRODUCTION" ->
+                    shift = Repo.shift(12).getOrNull()?.items ?: emptyList()
+                // 配料计划：配料员 / 仓库
+                Session.can("material.read") && role in listOf("MIXER", "WAREHOUSE") ->
+                    materials = Repo.materials().getOrNull()?.items ?: emptyList()
+                // 库存 + 生产实况：老板（与 Web 端 BOSS 视图一致）
+                Session.can("material.read") && role == "BOSS" -> {
+                    master = Repo.master().getOrNull()
+                    tasks = Repo.tasks().getOrDefault(emptyList())
+                }
+                // 排产与交期风险：PMC
+                role == "PMC" -> {
+                    tasks = Repo.tasks().getOrDefault(emptyList())
+                    orders = Repo.orders().getOrDefault(emptyList())
+                }
+                // 订单概况：业务员
+                role == "SALES" -> orders = Repo.orders().getOrDefault(emptyList())
+                // 台账概况：管理员
+                role == "ADMIN" -> master = Repo.master().getOrNull()
             }
         }.onFailure { error = it.message }
         loading = false
@@ -106,10 +137,10 @@ fun HomeScreen(
                 if (alerts.isEmpty()) EmptyBox("暂无换模或保养提醒")
                 else alerts.forEach { NoteCard(it) }
             }
-            else -> {
-                SectionTitle("快捷操作")
-                TextButton(onClick = onOpenAssistant) { Text("用一句话下单 / 出库 / 报工") }
-            }
+            "BOSS" -> BossBlock(master, tasks)
+            "PMC" -> PmcBlock(tasks, orders)
+            "SALES" -> SalesBlock(orders)
+            "ADMIN" -> AdminBlock(master)
         }
 
         SectionTitle("最新消息", "共 ${notes.size} 条")
@@ -142,6 +173,135 @@ private fun HomeStatCard(label: String, value: String, hint: String, modifier: M
         }
     }
 }
+
+/* ------------------------- 各角色的首页内容块 ------------------------- */
+
+/** 老板：库存概览 + 生产实况（对应 Web 端 BOSS 的 inventory + production 视图） */
+@Composable
+private fun BossBlock(master: JsonObject?, tasks: List<ScheduleTask>) {
+    SectionTitle("库存概览", "低于安全库存会标红")
+    val m = master
+    if (m == null) {
+        EmptyBox("暂无库存数据")
+    } else {
+        val mats = m.getAsJsonArray("materials")?.mapNotNull { it as? JsonObject } ?: emptyList()
+        val labels = m.getAsJsonArray("labels")?.mapNotNull { it as? JsonObject } ?: emptyList()
+        val products = m.getAsJsonArray("products")?.mapNotNull { it as? JsonObject } ?: emptyList()
+        val shortMats = mats.filter { jdouble(it, "stock_qty") < jdouble(it, "safety_stock") }
+        val shortLabels = labels.filter { jdouble(it, "stock_qty") < jdouble(it, "safety_stock") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MiniStat2("原料种类", "${mats.size}", Modifier.weight(1f))
+            MiniStat2("成品品类", "${products.size}", Modifier.weight(1f))
+            MiniStat2("库存预警", "${shortMats.size + shortLabels.size}", Modifier.weight(1f),
+                if (shortMats.isEmpty() && shortLabels.isEmpty()) Ok else Err)
+        }
+        (shortMats + shortLabels).take(5).forEach { s ->
+            Text(
+                "· ${s.get("name")?.asString ?: s.get("sku")?.asString ?: "-"}　库存 ${jdouble(s, "stock_qty").fmt()} ${s.get("unit")?.asString ?: ""} / 安全 ${jdouble(s, "safety_stock").fmt()}",
+                fontSize = 12.sp, color = Err,
+            )
+        }
+    }
+
+    SectionTitle("生产实况", "进行中 / 待执行的排产任务")
+    if (tasks.isEmpty()) EmptyBox("当前没有排产任务")
+    else {
+        Text("进行中与待执行任务 ${tasks.size} 项", fontSize = 13.sp)
+        tasks.take(3).forEach { t ->
+            Text(
+                "· ${t.product_name ?: "-"}　${t.planned_qty} 个　机台 ${t.machine_code}",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f),
+            )
+        }
+    }
+}
+
+/** PMC：排产任务 + 交期风险（对应 Web 端 PMC 的 schedule 视图） */
+@Composable
+private fun PmcBlock(tasks: List<ScheduleTask>, orders: List<OrderItem>) {
+    SectionTitle("排产任务", "共 ${tasks.size} 项")
+    if (tasks.isEmpty()) EmptyBox("暂无排产任务")
+    else {
+        val change = tasks.count { it.decision == "CHANGE_MOLD" }
+        if (change > 0) {
+            Text("其中 $change 项需要换模，注意预留换模时间。", fontSize = 12.sp, color = Warn)
+        }
+        tasks.take(3).forEach { t ->
+            Text(
+                "· ${t.product_name ?: "-"}　${t.planned_qty} 个　机台 ${t.machine_code}　${decisionZh(t.decision)}",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f),
+            )
+        }
+    }
+
+    SectionTitle("交期风险")
+    val today = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
+    val overdue = orders.filter { !it.due_date.isNullOrBlank() && it.due_date < today && it.remaining_qty > 0 }
+    if (overdue.isEmpty()) {
+        Text("没有已逾期订单", fontSize = 13.sp, color = Ok)
+    } else {
+        Text("${overdue.size} 张订单已逾期，请关注产能与交期协商。", fontSize = 13.sp, color = Err)
+        overdue.take(5).forEach { o ->
+            Text("· ${o.code} ${o.product_name ?: "-"}　交期 ${o.due_date}　待生产 ${o.remaining_qty}", fontSize = 12.sp, color = Err)
+        }
+    }
+}
+
+/** 业务员：订单概况 */
+@Composable
+private fun SalesBlock(orders: List<OrderItem>) {
+    SectionTitle("订单概况")
+    if (orders.isEmpty()) { EmptyBox("暂无订单"); return }
+    val open = orders.filter { it.remaining_qty > 0 }
+    val today = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
+    val dueSoon = open.filter { !it.due_date.isNullOrBlank() && it.due_date <= today }
+    Text("全部 ${orders.size} 张 · 进行中 ${open.size} 张 · 交期临近 ${dueSoon.size} 张", fontSize = 13.sp)
+    if (dueSoon.isNotEmpty()) {
+        Text("以下订单已到或超过交期，请跟进：", fontSize = 12.sp, color = Warn,
+            modifier = Modifier.padding(top = 4.dp))
+        dueSoon.take(5).forEach { o ->
+            Text("· ${o.code} ${o.product_name ?: "-"}　待生产 ${o.remaining_qty}　交期 ${o.due_date}", fontSize = 12.sp, color = Warn)
+        }
+    }
+}
+
+/** 管理员：台账概况 */
+@Composable
+private fun AdminBlock(master: JsonObject?) {
+    SectionTitle("台账概况", "基础数据完整性")
+    val m = master
+    if (m == null) { EmptyBox("暂无台账数据"); return }
+    fun cnt(key: String) = m.getAsJsonArray(key)?.size() ?: 0
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MiniStat2("机台", "${cnt("machines")}", Modifier.weight(1f))
+        MiniStat2("模具", "${cnt("molds")}", Modifier.weight(1f))
+        MiniStat2("产品", "${cnt("products")}", Modifier.weight(1f))
+        MiniStat2("客户", "${cnt("customers")}", Modifier.weight(1f))
+    }
+    val sparse = listOf("machines" to "机台", "molds" to "模具", "materials" to "原料", "customers" to "客户")
+        .filter { cnt(it.first) == 0 }
+    if (sparse.isNotEmpty()) {
+        Text(
+            "提示：${sparse.joinToString("、") { it.second }}尚未建档，AI 语义解析的准确度依赖台账数据，建议尽快在后台录入。",
+            fontSize = 12.sp, color = Warn, modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun MiniStat2(label: String, value: String, modifier: Modifier = Modifier, color: androidx.compose.ui.graphics.Color? = null) {
+    Card(modifier = modifier, elevation = CardDefaults.cardElevation(1.dp)) {
+        Column(Modifier.padding(10.dp)) {
+            Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .6f))
+            Text(value, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = color ?: MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+private fun jdouble(o: JsonObject, key: String): Double =
+    o.get(key)?.takeIf { it.isJsonPrimitive }?.asDouble ?: 0.0
+
+private fun Double.fmt(): String = if (this % 1.0 == 0.0) toLong().toString() else String.format("%.2f", this)
 
 @Composable
 private fun ShiftBlock(items: List<ShiftItem>) {

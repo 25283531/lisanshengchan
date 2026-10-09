@@ -73,6 +73,59 @@ fun levelColor(level: String?): Color = when (level) {
     else -> Brand
 }
 
+/* ------------------------- 服务端枚举的中文显示 ------------------------- */
+
+/** 订单状态 → 中文（与服务端 orders/schedule 模块的枚举保持一致） */
+fun orderStatusZh(s: String?): String = when (s) {
+    "DRAFT" -> "待排产"
+    "SCHEDULED" -> "已排产"
+    "RUNNING", "PRODUCING" -> "生产中"
+    "COMPLETED" -> "已完工"
+    "CANCELLED", "CANCELED" -> "已取消"
+    else -> s ?: "-"
+}
+
+/** 订单状态 → 标签颜色 */
+fun orderStatusColor(s: String?): Color = when (s) {
+    "DRAFT" -> Warn
+    "SCHEDULED" -> Brand
+    "RUNNING", "PRODUCING" -> Ok
+    "COMPLETED" -> Ok
+    "CANCELLED", "CANCELED" -> Err
+    else -> Brand
+}
+
+/** 排产换模决策 → 中文（KEEP_CURRENT_MOLD / CHANGE_MOLD / ACTIVATE_IDLE_MACHINE） */
+fun decisionZh(s: String?): String = when (s) {
+    "KEEP_CURRENT_MOLD" -> "沿用模具"
+    "CHANGE_MOLD" -> "需换模"
+    "ACTIVATE_IDLE_MACHINE" -> "启动机台"
+    else -> s ?: "-"
+}
+
+/** 权限点 → 中文（与服务端 rbac.js 的权限矩阵一一对应） */
+val PERMISSION_ZH: Map<String, String> = mapOf(
+    "master.read" to "台账查看",
+    "master.write" to "台账维护",
+    "stock.write" to "库存调整",
+    "order.read" to "订单查看",
+    "order.create" to "提交订单",
+    "order.update" to "修改订单",
+    "order.outbound" to "报工出库",
+    "maintenance.read" to "维保查看",
+    "maintenance.write" to "维保提交",
+    "schedule.read" to "排产查看",
+    "schedule.run" to "排产执行",
+    "material.read" to "配料查看",
+    "material.write" to "原料出入库",
+    "employee.manage" to "员工授权",
+    "tenant.config" to "公司配置",
+    "notify.read" to "消息接收",
+    "chat.use" to "AI 助手",
+    "audit.read" to "审计日志",
+    "wx.manage" to "小程序授权",
+)
+
 @Composable
 fun LoadingBox(text: String = "加载中…") {
     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {

@@ -62,7 +62,7 @@ fun ScheduleScreen() {
                 androidx.compose.foundation.layout.Column(Modifier.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("${t.product_name ?: "-"}　${t.planned_qty} 个", fontWeight = FontWeight.SemiBold)
-                        Tag(t.decision ?: "-")
+                        Tag(decisionZh(t.decision), if (t.decision == "CHANGE_MOLD") com.molding.mes.ui.theme.Warn else com.molding.mes.ui.theme.Brand)
                     }
                     Text("机台 ${t.machine_code}　模具 ${t.mold_code}", fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
@@ -79,7 +79,7 @@ fun ScheduleScreen() {
                 androidx.compose.foundation.layout.Column(Modifier.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("${o.product_name ?: "-"}", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        Tag(o.status ?: "-")
+                        Tag(orderStatusZh(o.status), orderStatusColor(o.status))
                     }
                     Text("${o.code}　${o.customer_name ?: "无客户"}", fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f))

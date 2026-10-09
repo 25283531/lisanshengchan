@@ -89,7 +89,7 @@ fun OrdersScreen() {
                 Column(Modifier.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(o.product_name ?: "-", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                        Tag(o.status ?: "DRAFT")
+                        Tag(orderStatusZh(o.status), orderStatusColor(o.status))
                     }
                     Text("${o.code}${o.customer_name?.let { " · $it" } ?: ""}", fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .7f))
