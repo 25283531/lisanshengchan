@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.gson.JsonObject
+import com.molding.mes.data.MasterData
 import com.molding.mes.data.MaterialGroup
 import com.molding.mes.data.NotificationItem
 import com.molding.mes.data.OrderItem
@@ -59,7 +60,7 @@ fun HomeScreen(
     var notes by remember { mutableStateOf<List<NotificationItem>>(emptyList()) }
     var orders by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
     var tasks by remember { mutableStateOf<List<ScheduleTask>>(emptyList()) }
-    var master by remember { mutableStateOf<JsonObject?>(null) }
+    var master by remember { mutableStateOf<MasterData?>(null) }
     var unread by remember { mutableStateOf(0) }
 
     suspend fun load() {
@@ -178,15 +179,14 @@ private fun HomeStatCard(label: String, value: String, hint: String, modifier: M
 
 /** 老板：库存概览 + 生产实况（对应 Web 端 BOSS 的 inventory + production 视图） */
 @Composable
-private fun BossBlock(master: JsonObject?, tasks: List<ScheduleTask>) {
+private fun BossBlock(master: MasterData?, tasks: List<ScheduleTask>) {
     SectionTitle("库存概览", "低于安全库存会标红")
-    val m = master
-    if (m == null) {
+    if (master == null) {
         EmptyBox("暂无库存数据")
     } else {
-        val mats = m.getAsJsonArray("materials")?.mapNotNull { it as? JsonObject } ?: emptyList()
-        val labels = m.getAsJsonArray("labels")?.mapNotNull { it as? JsonObject } ?: emptyList()
-        val products = m.getAsJsonArray("products")?.mapNotNull { it as? JsonObject } ?: emptyList()
+        val mats = master.materials
+        val labels = master.labels
+        val products = master.products
         val shortMats = mats.filter { jdouble(it, "stock_qty") < jdouble(it, "safety_stock") }
         val shortLabels = labels.filter { jdouble(it, "stock_qty") < jdouble(it, "safety_stock") }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -197,7 +197,7 @@ private fun BossBlock(master: JsonObject?, tasks: List<ScheduleTask>) {
         }
         (shortMats + shortLabels).take(5).forEach { s ->
             Text(
-                "· ${s.get("name")?.asString ?: s.get("sku")?.asString ?: "-"}　库存 ${jdouble(s, "stock_qty").fmt()} ${s.get("unit")?.asString ?: ""} / 安全 ${jdouble(s, "safety_stock").fmt()}",
+                "· ${s.get("name")?.takeIf { it.isJsonPrimitive }?.asString ?: s.get("sku")?.takeIf { it.isJsonPrimitive }?.asString ?: "-"}　库存 ${jdouble(s, "stock_qty").fmt()} ${s.get("unit")?.takeIf { it.isJsonPrimitive }?.asString ?: ""} / 安全 ${jdouble(s, "safety_stock").fmt()}",
                 fontSize = 12.sp, color = Err,
             )
         }
@@ -267,19 +267,17 @@ private fun SalesBlock(orders: List<OrderItem>) {
 
 /** 管理员：台账概况 */
 @Composable
-private fun AdminBlock(master: JsonObject?) {
+private fun AdminBlock(master: MasterData?) {
     SectionTitle("台账概况", "基础数据完整性")
-    val m = master
-    if (m == null) { EmptyBox("暂无台账数据"); return }
-    fun cnt(key: String) = m.getAsJsonArray(key)?.size() ?: 0
+    if (master == null) { EmptyBox("暂无台账数据"); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MiniStat2("机台", "${cnt("machines")}", Modifier.weight(1f))
-        MiniStat2("模具", "${cnt("molds")}", Modifier.weight(1f))
-        MiniStat2("产品", "${cnt("products")}", Modifier.weight(1f))
-        MiniStat2("客户", "${cnt("customers")}", Modifier.weight(1f))
+        MiniStat2("机台", "${master.machines.size}", Modifier.weight(1f))
+        MiniStat2("模具", "${master.molds.size}", Modifier.weight(1f))
+        MiniStat2("产品", "${master.products.size}", Modifier.weight(1f))
+        MiniStat2("客户", "${master.customers.size}", Modifier.weight(1f))
     }
-    val sparse = listOf("machines" to "机台", "molds" to "模具", "materials" to "原料", "customers" to "客户")
-        .filter { cnt(it.first) == 0 }
+    val sparse = listOf(master.machines to "机台", master.molds to "模具", master.materials to "原料", master.customers to "客户")
+        .filter { it.first.isEmpty() }
     if (sparse.isNotEmpty()) {
         Text(
             "提示：${sparse.joinToString("、") { it.second }}尚未建档，AI 语义解析的准确度依赖台账数据，建议尽快在后台录入。",
