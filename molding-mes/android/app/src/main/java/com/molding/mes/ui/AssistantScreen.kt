@@ -147,14 +147,14 @@ private fun ChatResultCard(r: ChatResult) {
             r.parsed?.let { p ->
                 if (r.needs_confirm) return@let
                 HorizontalDivider()
-                ParsedRow("产品", p.get("product"))
-                ParsedRow("客户", p.get("customer"))
-                ParsedRow("原料", p.get("material"))
-                ParsedRow("数量", p.get("quantity"))
-                ParsedRow("单位", p.get("unit"))
-                ParsedRow("交期", p.get("due_date"))
-                p.get("note")?.takeIf { it.isJsonPrimitive && !it.asString.isBlank() }?.let {
-                    Text(it.asString, fontSize = 11.sp,
+                ParsedRow("产品", p["product"])
+                ParsedRow("客户", p["customer"])
+                ParsedRow("原料", p["material"])
+                ParsedRow("数量", p["quantity"])
+                ParsedRow("单位", p["unit"])
+                ParsedRow("交期", p["due_date"])
+                fmtVal(p["note"])?.let {
+                    Text(it, fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = .55f))
                 }
             }
@@ -164,7 +164,7 @@ private fun ChatResultCard(r: ChatResult) {
                 Text("请补充或确认：", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 r.candidates.forEach { c ->
                     Text(
-                        "· ${candidateFieldZh(c.get("field")?.takeIf { it.isJsonPrimitive }?.asString)}：${c.get("input")?.takeIf { it.isJsonPrimitive && it.asString.isNotBlank() }?.asString ?: "（未识别）"}",
+                        "· ${candidateFieldZh(c["field"] as? String)}：${fmtVal(c["input"]) ?: "（未识别）"}",
                         fontSize = 12.sp,
                     )
                 }
@@ -176,9 +176,18 @@ private fun ChatResultCard(r: ChatResult) {
 }
 
 @Composable
-private fun ParsedRow(label: String, value: com.google.gson.JsonElement?) {
-    val v = value?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() } ?: return
+private fun ParsedRow(label: String, value: Any?) {
+    val v = fmtVal(value) ?: return
     Text("$label：$v", fontSize = 13.sp)
+}
+
+/** Map 里的值经 Gson 反序列化可能是 Double/Long/String/嵌套 Map，统一成可读文本 */
+private fun fmtVal(v: Any?): String? = when (v) {
+    null -> null
+    is String -> v.trim().takeIf { it.isNotEmpty() }
+    is Number -> if (v.toDouble() % 1.0 == 0.0) v.toLong().toString() else v.toString()
+    is Map<*, *> -> null
+    else -> v.toString().takeIf { it.isNotBlank() }
 }
 
 /** 意图 → 中文 */

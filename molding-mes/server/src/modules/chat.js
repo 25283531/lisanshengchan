@@ -20,6 +20,25 @@ import { createPlan } from './maintenance.js';
 
 const fmtTime = (s) => (s ? String(s).slice(5, 16) : '-');
 
+/**
+ * 递归去掉对象里值为 null 的键（数组里的 null 元素也一并剔除）。
+ * 安卓端 Gson 2.11 对声明为 JsonObject 的字段启用子类型强校验：
+ * 遇到 JSON null 会直接抛 "Expected a JsonObject but was JsonNull"（注册
+ * TypeAdapter 也拦不住——JSON_ELEMENT 工厂优先于用户注册表）。
+ * 改为在响应里**省略**这些键，客户端字段保持默认 null，新旧版本都安全。
+ */
+export const stripNulls = (v) => {
+  if (Array.isArray(v)) return v.filter((x) => x !== null && x !== undefined).map(stripNulls);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (val !== null && val !== undefined) o[k] = stripNulls(val);
+    }
+    return o;
+  }
+  return v;
+};
+
 export default function registerChatRoutes(app, db, ctx) {
   /** 解析并执行 */
   app.post('/api/chat', wrap(async (req) => {
@@ -52,7 +71,7 @@ export default function registerChatRoutes(app, db, ctx) {
       result: result?.status || 'OK', message: result?.message || null,
     });
 
-    return ok({
+    return ok(stripNulls({
       intent: parsed.intent,
       message: result.message,
       confidence: round(parsed.confidence ?? 0, 2),
@@ -65,7 +84,7 @@ export default function registerChatRoutes(app, db, ctx) {
       ai_unavailable: !!parsed.aiUnavailable,
       error: parsed.aiUnavailable ? AI_ERROR_MESSAGE : (parsed.error || null),
       error_detail: parsed.errorDetail || null,
-    });
+    }));
   }));
 
   /** 只解析不执行（用于 APP 预览确认） */
@@ -77,14 +96,14 @@ export default function registerChatRoutes(app, db, ctx) {
     const data = normalizeData(await loadTenantData(db, tid));
     const aiConfig = (await resolveAiConfig(db, tid)).config;
     const parsed = await parseUtterance(raw, { ...data, aiConfig, today: toStr(new Date()).slice(0, 10) });
-    return ok({
+    return ok(stripNulls({
       intent: parsed.intent, payload: parsed.payload, confidence: round(parsed.confidence ?? 0, 2),
       needs_confirm: parsed.needsConfirm, candidates: parsed.candidates,
       used_fallback: !!parsed.usedFallback, degraded: !!parsed.degraded,
       ai_unavailable: !!parsed.aiUnavailable,
       error: parsed.aiUnavailable ? AI_ERROR_MESSAGE : (parsed.error || null),
       error_detail: parsed.errorDetail || null,
-    });
+    }));
   }));
 
   /** 解析留痕 */

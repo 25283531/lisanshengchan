@@ -220,9 +220,17 @@ data class ChatResult(
     /** AI 不可用且本地接不住：message 固定为提示文案 */
     val ai_unavailable: Boolean = false,
     val needs_confirm: Boolean = false,
-    val candidates: List<JsonObject> = emptyList(),
-    val data: JsonObject? = null,
-    val parsed: JsonObject? = null,
+    /**
+     * 注意：这里**不能**用 JsonObject/JsonObject? —— Gson 2.11 起
+     * JSON_ELEMENT 工厂对 JsonElement 子类型字段强校验运行时类型，
+     * JSON null（JsonNull.INSTANCE）会直接抛
+     * "Expected a JsonObject but was JsonNull"，且 registerTypeAdapter
+     * 优先级低于该内置工厂、拦不住。改用 Map/Any?（走 ObjectTypeAdapter，
+     * null → Kotlin null，无子类型校验），配合服务端 stripNulls 双保险。
+     */
+    val candidates: List<Map<String, Any?>> = emptyList(),
+    val data: Any? = null,
+    val parsed: Map<String, Any?>? = null,
     val error: String? = null,
 )
 
