@@ -9,17 +9,18 @@
 |---|---|---|
 | POST | `/api/platform/login` | 平台口令登录 |
 | POST | `/api/platform/tenants` | 注册公司（同时创建公司管理员与默认 AI 配置） |
-| GET | `/api/platform/tenants` | 公司列表（含已用用户数） |
+| GET | `/api/platform/tenants` | 公司列表（含已用用户数、**管理员账号**、**初始密码**） |
 | GET | `/api/platform/tenants/:id` | 公司详情（含员工） |
 | PUT | `/api/platform/tenants/:id/license` | 调整用户数 / 到期日 / 状态 |
-| POST | `/api/platform/tenants/:id/reset-admin` | 重置管理员密码 |
+| PUT | `/api/platform/tenants/:id/admin` | 改管理员手机号 / 姓名（管理员账号即登录账号） |
+| POST | `/api/platform/tenants/:id/reset-admin` | 重置管理员初始密码（不传则随机 6 位，返回明文） |
 | GET | `/api/platform/stats` | 平台统计（含 30 天内到期公司） |
 
 ## 登录与身份
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/auth/login` | 手机号 + 密码登录 `{phone,password,tenantCode?}`，返回 `must_change_password` |
+| POST | `/api/auth/login` | 手机号 + 密码登录 `{phone,password,tenantCode?}`（tenantCode 可填公司编码或名称），返回 `must_change_password` |
 | GET | `/api/auth/me` | 当前用户、角色、权限、公司、密码状态 |
 | POST | `/api/auth/password` | 修改本人密码 `{oldPassword,newPassword}`，改完清初始密码标记 |
 | POST | `/api/auth/password/later` | 暂不修改，保留管理员下发的初始密码 |

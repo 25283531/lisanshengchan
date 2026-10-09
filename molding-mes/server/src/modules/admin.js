@@ -6,7 +6,7 @@
  */
 import { wrap, ok, fail, AppError } from '../lib/http.js';
 import { hashPassword } from '../lib/auth.js';
-import { nowStr, num } from '../lib/util.js';
+import { nowStr, num, randomPassword } from '../lib/util.js';
 import { audit } from '../lib/repo.js';
 import { checkSeat, requirePerm } from '../middleware.js';
 import { ALL_ROLES, ROLES, roleZh } from '../lib/rbac.js';
@@ -54,7 +54,7 @@ export default function registerAdminRoutes(app, db, ctx) {
     const user = adminOnly(req);
     const rows = await db.query(
       `SELECT id, phone, name, role, status, machine_code, last_login_at, created_at,
-              password_hash, must_change_password, password_updated_at
+              password_hash, must_change_password, password_updated_at, initial_password
        FROM users WHERE tenant_id = ? ORDER BY role, id`,
       [user.tenant_id],
     );
@@ -64,6 +64,8 @@ export default function registerAdminRoutes(app, db, ctx) {
       has_password: !!r.password_hash,
       must_change_password: !!r.must_change_password,
       password_updated_at: r.password_updated_at || null,
+      /** 管理员下发的初始密码（员工自行改密后清空） */
+      initial_password: r.initial_password || null,
       /** 初始密码 / 已自行修改 / 未设置 */
       password_state: !r.password_hash ? 'NONE' : (r.must_change_password ? 'INITIAL' : 'CHANGED'),
     })));
@@ -84,9 +86,10 @@ export default function registerAdminRoutes(app, db, ctx) {
 
     const init = resolveInitialPassword(b);
     const id = await db.run(
-      `INSERT INTO users (tenant_id, phone, name, password_hash, must_change_password, role, status, machine_code, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [tid, phone, String(b.name || '').trim() || '未命名', hashPassword(init), 1,
+      `INSERT INTO users (tenant_id, phone, name, password_hash, must_change_password,
+                          initial_password, role, status, machine_code, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [tid, phone, String(b.name || '').trim() || '未命名', hashPassword(init), 1, init,
         b.role, 'ACTIVE', b.machineCode || null, nowStr(), nowStr()],
     );
     await audit(db, { tenantId: tid, userId: user.id, action: 'employee.authorize', detail: { phone, role: b.role } });
@@ -149,9 +152,10 @@ export default function registerAdminRoutes(app, db, ctx) {
     if (!target) return fail('员工不存在', 'NOT_FOUND', 404);
     const init = resolveInitialPassword(req.body || {});
     await db.run(
-      `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL, updated_at = ?
+      `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL,
+                        initial_password = ?, updated_at = ?
        WHERE id = ? AND tenant_id = ?`,
-      [hashPassword(init), nowStr(), id, tid],
+      [hashPassword(init), init, nowStr(), id, tid],
     );
     await audit(db, { tenantId: tid, userId: user.id, action: 'employee.reset_password', detail: { id, phone: target.phone } });
     return ok({ id, phone: target.phone, name: target.name, initial_password: init, must_change_password: true },
@@ -183,9 +187,10 @@ export default function registerAdminRoutes(app, db, ctx) {
     for (const r of rows) {
       const pwd = shared || randomPassword();
       await db.run(
-        `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL, updated_at = ?
+        `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL,
+                          initial_password = ?, updated_at = ?
          WHERE id = ? AND tenant_id = ?`,
-        [hashPassword(pwd), nowStr(), r.id, tid],
+        [hashPassword(pwd), pwd, nowStr(), r.id, tid],
       );
       issued.push({ id: r.id, phone: r.phone, name: r.name, initial_password: pwd });
     }
@@ -323,7 +328,3 @@ function resolveInitialPassword(b) {
   return given;
 }
 
-/** 6 位数字初始密码（便于电话/口头告知，员工首次登录后可自行改） */
-function randomPassword() {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}

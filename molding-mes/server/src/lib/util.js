@@ -65,6 +65,13 @@ export function bizCode(prefix, date = new Date()) {
 }
 
 /** 简易中文数字/单位解析：2万 / 2万个 / 20000 / 2.5万 */
+/**
+ * 6 位数字初始密码。
+ * 选数字而不是随机串：管理员多半是打电话或当面口头告知员工，字母符号念不清楚。
+ * 员工首次登录后可自行改密，改完即清空明文。
+ */
+export const randomPassword = () => String(Math.floor(100000 + Math.random() * 900000));
+
 export function parseChineseNumber(text) {
   if (typeof text === 'number') return text;
   const s = String(text ?? '').replace(/[,，\s]/g, '');

@@ -46,8 +46,25 @@ $('#btn-login').addEventListener('click', async () => {
     });
     state.token = d.token; state.user = d.user; state.tenant = d.tenant; state.platform = false;
     boot();
-  } catch (e) { $('#login-err').textContent = e.message; }
+  } catch (e) { showLoginError(e); }
 });
+
+/** 手机号挂在多家公司时，直接给出可点的公司按钮，别让人猜编码 */
+function showLoginError(e) {
+  const box = $('#login-err');
+  const list = e.extra && e.extra.tenants;
+  if (list && list.length) {
+    box.innerHTML = `${esc(e.message)}<div class="tenant-pick">${
+      list.map((t) => `<button data-tc="${esc(t.code)}">${esc(t.name)}（${esc(t.code)}）</button>`).join('')
+    }</div>`;
+    box.querySelectorAll('[data-tc]').forEach((b) => b.addEventListener('click', () => {
+      $('#lg-code').value = b.dataset.tc;
+      $('#btn-login').click();
+    }));
+    return;
+  }
+  box.textContent = e.message;
+}
 
 $('#btn-platform-login').addEventListener('click', async () => {
   try {
@@ -196,7 +213,9 @@ async function employees() {
 function pwdTag(u) {
   const s = u.password_state || (u.has_password ? 'CHANGED' : 'NONE');
   if (s === 'NONE') return '<span class="tag err">未设置</span>';
-  if (s === 'INITIAL') return '<span class="tag warn">待修改（初始密码）</span>';
+  if (s === 'INITIAL') {
+    return `<span class="tag warn">初始密码 ${u.initial_password ? esc(u.initial_password) : '（已隐藏）'}</span>`;
+  }
   return `<span class="tag ok">已改${u.password_updated_at ? ' ' + esc(String(u.password_updated_at).slice(5, 16)) : ''}</span>`;
 }
 
@@ -981,37 +1000,60 @@ async function tenants() {
   return `
   <section><header><h2>注册公司</h2></header>
     <div class="row">
-      <label>公司编码<input id="t-code" placeholder="DEMO"></label>
+      <label>公司编码（登录用）<input id="t-code" placeholder="DEMO"></label>
       <label>公司名称<input id="t-name" placeholder="某某注塑厂"></label>
       <label>管理员姓名<input id="t-admin" placeholder="张厂长"></label>
       <label>管理员手机号<input id="t-phone" placeholder="13800000001"></label>
-      <label>初始密码<input id="t-pwd" value="123456"></label>
+      <label>初始密码<input id="t-pwd" placeholder="留空自动生成 6 位"></label>
       <label>授权用户数<input id="t-max" type="number" value="20"></label>
       <label>授权到期日<input id="t-exp" type="date"></label>
       <button id="t-add" class="primary" style="width:auto">注册</button>
     </div>
+    <p class="hint">注册即<strong>同时建好第一个管理员账号</strong>：管理员手机号就是登录账号，
+      凭初始密码可直接登录，<strong>不需要</strong>先在后台给自己授权（授权页面只有登录后才进得去）。
+      注册后请在本表「初始密码」列查看并告知本人。</p>
+    ${tenantResultHtml()}
   </section>
   <section><header><h2>公司列表与授权</h2></header>
-    <table><thead><tr><th>ID</th><th>编码</th><th>名称</th><th class="num">已用/上限</th><th>到期日</th><th>状态</th><th>调整授权</th></tr></thead>
+    <table><thead><tr><th>ID</th><th>编码</th><th>名称</th><th>管理员账号</th><th>初始密码</th>
+      <th class="num">已用/上限</th><th>到期日</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>${list.map((t) => `<tr><td>${t.id}</td><td>${esc(t.code)}</td><td>${esc(t.name)}</td>
-      <td class="num">${t.used_users} / ${t.max_users}</td><td>${esc(t.expires_at ? String(t.expires_at).slice(0, 10) : '不限期')}</td>
+      <td>${t.has_admin ? `${esc(t.admin_phone || '')}<div class="muted">${esc(t.admin_name || '')}</div>`
+        : '<span class="tag err">无管理员</span>'}</td>
+      <td>${t.admin_initial_password
+        ? `<code>${esc(t.admin_initial_password)}</code><div class="muted">待本人修改</div>`
+        : (t.has_admin
+          ? (t.admin_password_updated_at ? '<span class="tag ok">已自行修改</span>'
+            : '<span class="tag warn">未知，请重置</span>')
+          : '<span class="muted">—</span>')}</td>
+      <td class="num">${t.used_users} / ${t.max_users}</td>
+      <td>${esc(t.expires_at ? String(t.expires_at).slice(0, 10) : '不限期')}</td>
       <td><span class="tag ${t.status === 'ACTIVE' ? 'ok' : 'err'}">${esc(t.status)}</span></td>
-      <td><button data-tb="${t.id}" data-max="${t.max_users}" data-exp="${t.expires_at ? String(t.expires_at).slice(0, 10) : ''}">修改</button></td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">尚无公司</td></tr>'}</tbody></table>
+      <td><button data-tb="${t.id}" data-max="${t.max_users}" data-exp="${t.expires_at ? String(t.expires_at).slice(0, 10) : ''}">授权</button>
+        <button data-ta="${t.id}" data-phone="${esc(t.admin_phone || '')}" data-aname="${esc(t.admin_name || '')}">改管理员</button>
+        <button data-tp="${t.id}"${t.has_admin ? '' : ' disabled'}>重置密码</button></td>
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">尚无公司</td></tr>'}</tbody></table>
+    <p class="hint">「重置密码」不填即随机 6 位数字，重置后明文会显示在本表，请告知本人。
+      管理员若已自行改过密码，本列显示「已自行修改」，不再保留明文。</p>
   </section>`;
 }
 function bindTenants() {
   $('#t-add').addEventListener('click', async () => {
     try {
-      await api('POST', '/api/platform/tenants', {
+      const r = await api('POST', '/api/platform/tenants', {
         code: $('#t-code').value.trim(), name: $('#t-name').value.trim(),
         adminName: $('#t-admin').value.trim(), adminPhone: $('#t-phone').value.trim(),
         adminPassword: $('#t-pwd').value, maxUsers: Number($('#t-max').value),
         expiresAt: $('#t-exp').value || null,
       });
+      state._tenantResult = {
+        code: r.code, name: r.name, phone: r.adminPhone || r.admin_phone,
+        password: r.initial_password, tip: '已建好管理员账号，可直接登录',
+      };
       toast('公司已注册', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   });
+
   $$('[data-tb]').forEach((b) => b.addEventListener('click', async () => {
     const max = prompt('授权用户数', b.dataset.max);
     if (max === null) return;
@@ -1021,6 +1063,44 @@ function bindTenants() {
       toast('授权已更新', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   }));
+
+  $$('[data-ta]').forEach((b) => b.addEventListener('click', async () => {
+    const phone = prompt('管理员手机号（即登录账号）', b.dataset.phone);
+    if (phone === null) return;
+    const name = prompt('管理员姓名', b.dataset.aname);
+    try {
+      await api('PUT', `/api/platform/tenants/${b.dataset.ta}/admin`, { adminPhone: phone.trim(), adminName: name || undefined });
+      toast('管理员已更新', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  }));
+
+  $$('[data-tp]').forEach((b) => b.addEventListener('click', async () => {
+    const pwd = prompt('新的初始密码（留空则随机生成 6 位）', '');
+    if (pwd === null) return;
+    try {
+      const r = await api('POST', `/api/platform/tenants/${b.dataset.tp}/reset-admin`, { password: pwd || undefined });
+      state._tenantResult = {
+        code: '', name: '管理员密码已重置', phone: r.phone,
+        password: r.initial_password, tip: '请告知本人，本人登录后建议修改',
+      };
+      toast('密码已重置', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  }));
+
+  const close = $('#t-pwd-close');
+  if (close) close.addEventListener('click', () => { state._tenantResult = null; render(); });
+}
+
+/** 注册/重置后的明文密码面板：与员工页一致，刷新即消失，不长期留存 */
+function tenantResultHtml() {
+  const r = state._tenantResult;
+  if (!r) return '';
+  return `<section><header><h2>初始密码（仅本次显示）</h2><span class="spacer"></span>
+      <button id="t-pwd-close" style="width:auto">关闭</button></header>
+    <table><thead><tr><th>公司</th><th>管理员账号</th><th>初始密码</th><th>说明</th></tr></thead>
+    <tbody><tr><td>${esc(r.code ? `${r.name}（${r.code}）` : r.name)}</td>
+      <td>${esc(r.phone || '')}</td><td><code>${esc(r.password || '')}</code></td>
+      <td class="muted">${esc(r.tip || '')}</td></tr></tbody></table></section>`;
 }
 
 async function stats() {

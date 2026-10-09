@@ -47,7 +47,7 @@ services:
         max-file: "3"
 
   server:
-    image: ghcr.io/25283531/lisanshengchan-mes-server:v3.6.3
+    image: ghcr.io/25283531/lisanshengchan-mes-server:v3.7.0
     container_name: mes-server
     restart: unless-stopped
     depends_on:
@@ -82,7 +82,7 @@ services:
     logging: *log
 
   optimizer:
-    image: ghcr.io/25283531/lisanshengchan-mes-optimizer:v3.6.3
+    image: ghcr.io/25283531/lisanshengchan-mes-optimizer:v3.7.0
     container_name: mes-optimizer
     restart: unless-stopped
     environment:

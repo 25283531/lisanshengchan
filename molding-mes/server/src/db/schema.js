@@ -83,6 +83,11 @@ export const TABLES = [
       ['must_change_password', 'BOOL', null, 0],
       /** 员工最后一次自行改密码的时间；为空表示仍在使用管理员下发的初始密码 */
       ['password_updated_at', 'DT', null, null, true],
+      /**
+       * 管理员下发的初始密码（明文，仅用于管理员/平台在列表里查看与告知本人）。
+       * 员工自行改密码后即清空，不再留明文。只有平台侧与公司管理员接口会读这列。
+       */
+      ['initial_password', 'STR', 64, null, true],
       ['role', 'STR', 24, 'PRODUCTION'],
       ['status', 'STR', 20, 'ACTIVE'],
       /** 生产人员可绑定机台，也可不绑定（NULL 表示接收全部机台消息） */

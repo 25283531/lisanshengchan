@@ -4,9 +4,27 @@
  */
 import { wrap, ok, fail, AppError } from '../lib/http.js';
 import { hashPassword } from '../lib/auth.js';
-import { nowStr, toStr, num } from '../lib/util.js';
+import { nowStr, toStr, num, randomPassword } from '../lib/util.js';
 import { audit } from '../lib/repo.js';
 import { readGlobalAi, publicView, envAiConfig, testAiConnection } from '../domain/ai-config.js';
+
+const PHONE_RE = /^1[3-9]\d{9}$/;
+
+/**
+ * 公司列表里的一行：补上管理员账号（= 管理员手机号）与初始密码。
+ * 初始密码只在管理员还没自行改密时存在；改过就为 null，界面显示「已自行修改」。
+ */
+const shapeTenant = (t, admin) => ({
+  ...t,
+  admin_user_id: admin?.id || null,
+  admin_phone: admin?.phone || t.contact_phone || null,
+  admin_name: admin?.name || t.contact_name || null,
+  admin_status: admin?.status || null,
+  admin_initial_password: admin?.initial_password || null,
+  admin_last_login_at: admin?.last_login_at || null,
+  admin_password_updated_at: admin?.password_updated_at || null,
+  has_admin: !!admin,
+});
 
 const requirePlatform = (req) => {
   if (!req.user || req.user.role !== 'PLATFORM') {
@@ -28,7 +46,7 @@ export default function registerPlatformRoutes(app, db, ctx) {
     }
   });
 
-  /** 注册公司 */
+  /** 注册公司：同时建好第一个管理员账号（注册者不需要再被任何人授权） */
   app.post('/api/platform/tenants', wrap(async (req) => {
     requirePlatform(req);
     const b = req.body || {};
@@ -36,9 +54,19 @@ export default function registerPlatformRoutes(app, db, ctx) {
     const name = String(b.name || '').trim();
     const adminPhone = String(b.adminPhone || '').trim();
     if (!code || !name || !adminPhone) return fail('公司编码、名称、管理员手机号必填', 'PARAM_MISSING', 400);
+    if (!PHONE_RE.test(adminPhone)) {
+      return fail('管理员手机号格式不正确（需 11 位中国大陆号码）', 'BAD_PHONE', 400);
+    }
     if (await db.get('SELECT id FROM tenants WHERE code = ?', [code])) {
       return fail(`公司编码 ${code} 已存在`, 'DUPLICATE', 409);
     }
+    if (await db.get('SELECT id FROM tenants WHERE name = ?', [name])) {
+      return fail(`公司名称 ${name} 已存在`, 'DUPLICATE', 409);
+    }
+
+    /** 初始密码：不填就随机 6 位数字；明文存一份，平台列表里要能直接看到并告知本人 */
+    const init = b.adminPassword ? String(b.adminPassword) : randomPassword();
+    if (init.length < 6) return fail('初始密码至少 6 位', 'WEAK_PASSWORD', 400);
 
     const tenantId = await db.transaction(async () => {
       const now = nowStr();
@@ -51,10 +79,11 @@ export default function registerPlatformRoutes(app, db, ctx) {
       const tid = Number(r.insertId);
 
       await db.run(
-        `INSERT INTO users (tenant_id, phone, name, password_hash, role, status, machine_code, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-        [tid, adminPhone, b.adminName || '管理员', hashPassword(String(b.adminPassword || '123456')),
-          'ADMIN', 'ACTIVE', null, now, now],
+        `INSERT INTO users (tenant_id, phone, name, password_hash, must_change_password,
+                            initial_password, role, status, machine_code, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [tid, adminPhone, String(b.adminName || '').trim() || '管理员', hashPassword(init), 1,
+          init, 'ADMIN', 'ACTIVE', null, now, now],
       );
 
       await db.run(
@@ -67,7 +96,10 @@ export default function registerPlatformRoutes(app, db, ctx) {
     });
 
     await audit(db, { action: 'platform.tenant.create', detail: { code, name, adminPhone, maxUsers: b.maxUsers } });
-    return ok({ id: tenantId, code, name, adminPhone }, `公司「${name}」已注册，管理员可用手机号 ${adminPhone} 登录`);
+    return ok(
+      { id: tenantId, code, name, adminPhone, admin_user_id: null, initial_password: init },
+      `公司「${name}」已注册：管理员账号 ${adminPhone}，初始密码 ${init}（请告知本人，登录后建议修改）`,
+    );
   }));
 
   app.get('/api/platform/tenants', wrap(async (req) => {
@@ -76,15 +108,63 @@ export default function registerPlatformRoutes(app, db, ctx) {
       `SELECT t.*, (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.status='ACTIVE') AS used_users
        FROM tenants t ORDER BY t.id DESC`,
     );
-    return ok(rows);
+    // 管理员单独取一次再拼：避免 LEFT JOIN + GROUP BY 在 MySQL 的 ONLY_FULL_GROUP_BY 下报错
+    const admins = await db.query(
+      `SELECT tenant_id, id, phone, name, status, initial_password, last_login_at, password_updated_at
+       FROM users WHERE role = 'ADMIN' ORDER BY id`,
+    );
+    const byTenant = new Map();
+    for (const a of admins) if (!byTenant.has(a.tenant_id)) byTenant.set(a.tenant_id, a);
+    return ok(rows.map((r) => shapeTenant(r, byTenant.get(r.id))));
   }));
 
   app.get('/api/platform/tenants/:id', wrap(async (req) => {
     requirePlatform(req);
     const t = await db.get('SELECT * FROM tenants WHERE id = ?', [req.params.id]);
     if (!t) return fail('公司不存在', 'NOT_FOUND', 404);
-    const users = await db.query('SELECT id, phone, name, role, status, machine_code FROM users WHERE tenant_id = ? ORDER BY id', [t.id]);
-    return ok({ ...t, users });
+    const users = await db.query(
+      'SELECT id, phone, name, role, status, machine_code, initial_password FROM users WHERE tenant_id = ? ORDER BY id',
+      [t.id],
+    );
+    const admin = users.find((u) => u.role === 'ADMIN') || null;
+    return ok({
+      ...t,
+      admin_phone: admin?.phone || t.contact_phone || null,
+      admin_name: admin?.name || t.contact_name || null,
+      admin_initial_password: admin?.initial_password || null,
+      users,
+    });
+  }));
+
+  /**
+   * 改公司管理员（注册者）的手机号 / 姓名。
+   * 平台经常要在开账号后修正号码（录错、换人），而公司自己没人能改管理员手机号。
+   */
+  app.put('/api/platform/tenants/:id/admin', wrap(async (req) => {
+    requirePlatform(req);
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    const t = await db.get('SELECT * FROM tenants WHERE id = ?', [id]);
+    if (!t) return fail('公司不存在', 'NOT_FOUND', 404);
+    const phone = b.adminPhone === undefined ? null : String(b.adminPhone || '').trim();
+    if (phone !== null && !PHONE_RE.test(phone)) {
+      return fail('管理员手机号格式不正确（需 11 位中国大陆号码）', 'BAD_PHONE', 400);
+    }
+    const admin = await db.get("SELECT * FROM users WHERE tenant_id = ? AND role = 'ADMIN' ORDER BY id LIMIT 1", [id]);
+    if (!admin) return fail('该公司没有管理员账号', 'NOT_FOUND', 404);
+
+    const now = nowStr();
+    if (phone && phone !== admin.phone) {
+      if (await db.get('SELECT id FROM users WHERE tenant_id = ? AND phone = ? AND id <> ?', [id, phone, admin.id])) {
+        return fail(`本公司已存在手机号 ${phone}`, 'DUPLICATE', 409);
+      }
+    }
+    await db.run('UPDATE users SET phone = ?, name = ?, updated_at = ? WHERE id = ?',
+      [phone || admin.phone, b.adminName ? String(b.adminName) : admin.name, now, admin.id]);
+    await db.run('UPDATE tenants SET contact_phone = ?, contact_name = ?, updated_at = ? WHERE id = ?',
+      [phone || admin.phone, b.adminName ? String(b.adminName) : (t.contact_name || admin.name), now, id]);
+    await audit(db, { tenantId: id, action: 'platform.admin.update', detail: { id: admin.id, phone, name: b.adminName } });
+    return ok({ id: admin.id, phone: phone || admin.phone, name: b.adminName || admin.name }, '管理员账号已更新');
   }));
 
   /** 调整授权：用户数、期限、状态 */
@@ -107,16 +187,26 @@ export default function registerPlatformRoutes(app, db, ctx) {
     return ok(patch, '授权已更新');
   }));
 
-  /** 重置公司管理员密码 */
+  /** 重置公司管理员密码：不传则随机 6 位；明文同步入库，列表里可直接看到 */
   app.post('/api/platform/tenants/:id/reset-admin', wrap(async (req) => {
     requirePlatform(req);
     const id = Number(req.params.id);
-    const pwd = String((req.body || {}).password || '123456');
+    const b = req.body || {};
+    const pwd = b.password ? String(b.password) : randomPassword();
+    if (pwd.length < 6) return fail('密码至少 6 位', 'WEAK_PASSWORD', 400);
     const admin = await db.get("SELECT * FROM users WHERE tenant_id = ? AND role = 'ADMIN' ORDER BY id LIMIT 1", [id]);
     if (!admin) return fail('该公司没有管理员账号', 'NOT_FOUND', 404);
-    await db.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [hashPassword(pwd), nowStr(), admin.id]);
+    await db.run(
+      `UPDATE users SET password_hash = ?, must_change_password = 1, password_updated_at = NULL,
+                        initial_password = ?, updated_at = ?
+       WHERE id = ?`,
+      [hashPassword(pwd), pwd, nowStr(), admin.id],
+    );
     await audit(db, { tenantId: id, action: 'platform.admin.reset_password', detail: { user_id: admin.id } });
-    return ok({ phone: admin.phone }, '管理员密码已重置');
+    return ok(
+      { id: admin.id, phone: admin.phone, name: admin.name, initial_password: pwd },
+      `管理员 ${admin.phone} 密码已重置为 ${pwd}（请告知本人）`,
+    );
   }));
 
   /* ------------------- 平台级 AI 接口配置（系统管理员） ------------------- */
