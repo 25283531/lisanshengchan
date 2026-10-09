@@ -117,6 +117,22 @@ export const INTAKE_KEYS = Object.keys(INTAKE_TARGETS);
 
 export const fieldDef = (target, field) => INTAKE_TARGETS[target]?.fields?.[field] || null;
 
+/**
+ * 预览表的列定义（中文表头 + 枚举可选值）。
+ * 解析结果里的字段名是库表英文名（code/cavities…），直接给用户看不友好；
+ * 这里把每个 target 的中文名和枚举项下发，前端照此渲染表头和下拉框。
+ */
+export function columnsOf(target) {
+  const t = INTAKE_TARGETS[target];
+  if (!t) return [];
+  return Object.entries(t.fields).map(([field, f]) => ({
+    field,
+    zh: f.zh,
+    type: f.enum ? 'enum' : (f.type || 'text'),
+    enum: f.enum || null,
+  }));
+}
+
 /* ------------------------------ 值归一化 ------------------------------ */
 
 /** "PP:120,PE:30" → [{material_sku:'PP', grams:120}] */

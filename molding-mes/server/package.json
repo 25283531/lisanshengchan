@@ -1,6 +1,6 @@
 {
   "name": "molding-mes-server",
-  "version": "3.7.2",
+  "version": "3.7.3",
   "private": true,
   "type": "module",
   "description": "注塑生产协同 MES 服务端：多租户、角色授权、AI 自然语言下单、排产引擎与消息分发",

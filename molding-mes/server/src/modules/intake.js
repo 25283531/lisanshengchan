@@ -21,7 +21,7 @@ import { resolveAiConfig } from '../domain/ai-config.js';
 import { AI_ERROR_MESSAGE } from '../domain/nlp.js';
 import {
   INTAKE_TARGETS, INTAKE_KEYS, rowsFromTable, fallbackParseText,
-  aiParseText, aiParseModify, fallbackParseModify, coerceValue, mapHeader,
+  aiParseText, aiParseModify, fallbackParseModify, coerceValue, mapHeader, columnsOf,
 } from '../domain/intake.js';
 
 /** 每个类型对应的中文名/别名（用于改数时的实体定位） */
@@ -59,7 +59,11 @@ export default async function registerIntakeRoutes(app, db, ctx) {
     const { target, text } = req.body || {};
     const out = await parseTextToDraft(db, user, target, String(text || '').trim());
     return ok(
-      { draft_id: out.draft_id, target, rows: out.rows, warnings: out.warnings, used_fallback: out.used_fallback },
+      {
+        draft_id: out.draft_id, target, target_zh: INTAKE_TARGETS[target].zh,
+        rows: out.rows, warnings: out.warnings, used_fallback: out.used_fallback,
+        columns: columnsOf(target),
+      },
       `已解析出 ${out.rows.length} 条${INTAKE_TARGETS[target].zh}，请核对后导入`,
     );
   }));
@@ -93,7 +97,8 @@ export default async function registerIntakeRoutes(app, db, ctx) {
       message: warnings[0] || null,
     });
     return ok({
-      draft_id: draftId, target, file_name: fileName, rows, warnings,
+      draft_id: draftId, target, target_zh: INTAKE_TARGETS[target].zh, file_name: fileName,
+      rows, warnings, columns: columnsOf(target),
       sheet_rows: table.length - 1,
     }, `已从 ${fileName} 解析出 ${rows.length} 条${INTAKE_TARGETS[target].zh}，请核对后导入`);
   }));

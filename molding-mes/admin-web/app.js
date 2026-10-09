@@ -610,13 +610,26 @@ function renderIntakePreview(warnings = []) {
     return;
   }
   const cols = [...new Set(ik.rows.flatMap((r) => Object.keys(r).filter((k) => k !== '_row')))];
+  const colDef = (c) => (ik.columns || []).find((x) => x.field === c) || null;
+  /* 枚举字段的英文值 → 中文名（显示用；提交仍是英文值，落库不受影响） */
+  const ENUM_ZH = {
+    AVAILABLE: '可用', MAINTENANCE: '维护中', RETIRED: '已报废', FAULT: '故障',
+    CENTRALIZED: '集中供料', HOPPER: '料斗供料', MANUAL: '人工投料',
+  };
   const cell = (v, i, c) => {
-    if (v === null || v === undefined) return '';
-    if (typeof v === 'object') return esc(JSON.stringify(v));
+    if (v === null || v === undefined) v = '';
+    const en = colDef(c)?.enum;
+    if (en) {
+      const cur = String(v);
+      return `<select data-ik="${i}" data-f="${c}" style="width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:6px">` +
+        en.map((e) => `<option value="${esc(e)}" ${e === cur ? 'selected' : ''}>${esc(ENUM_ZH[e] || e)}</option>`).join('') +
+        `</select>`;
+    }
+    if (typeof v === 'object') v = JSON.stringify(v);
     return `<input data-ik="${i}" data-f="${c}" value="${esc(v)}" style="width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:6px">`;
   };
   box.innerHTML = `
-    <table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}<th></th></tr></thead>
+    <table><thead><tr>${cols.map((c) => `<th>${esc(colDef(c)?.zh || c)}</th>`).join('')}<th></th></tr></thead>
       <tbody>${ik.rows.map((r, i) => `<tr>${cols.map((c) => `<td>${cell(r[c], i, c)}</td>`).join('')}
         <td><button data-ikrm="${i}">移除</button></td></tr>`).join('')}</tbody></table>
     ${warnings.length ? `<p class="hint">${warnings.map((w) => esc(w)).join('；')}</p>` : ''}`;
@@ -636,7 +649,7 @@ function bindIntake() {
     $('#ik-msg').textContent = '解析中…';
     try {
       const d = await api('POST', '/api/intake/text', { target, text });
-      state._ik = { target, rows: d.rows, draftId: d.draft_id };
+      state._ik = { target, rows: d.rows, draftId: d.draft_id, columns: d.columns || [] };
       $('#ik-msg').textContent = d.used_fallback ? '（未使用 AI，走确定性解析）' : '（AI 解析）';
       renderIntakePreview(d.warnings || []);
       toast(`已解析出 ${d.rows.length} 条`, 'ok');
@@ -656,7 +669,7 @@ function bindIntake() {
       });
       const json = await res.json();
       if (json.code !== 0) throw new Error(json.message || '解析失败');
-      state._ik = { target: $('#ik-target').value, rows: json.data.rows, draftId: json.data.draft_id };
+      state._ik = { target: $('#ik-target').value, rows: json.data.rows, draftId: json.data.draft_id, columns: json.data.columns || [] };
       $('#ik-msg').textContent = `${json.data.file_name} · 解析出 ${json.data.rows.length} 条`;
       renderIntakePreview(json.data.warnings || []);
       toast('解析完成，请核对', 'ok');
@@ -718,8 +731,8 @@ async function ai() {
     <p class="hint">${esc(d.explain || '')}</p>
 
     <div class="cards">
-      <div class="card"><div class="k">生效模型</div><div class="v" style="font-size:16px">${esc(d.model || '')}</div>
-        <div class="muted">${esc(d.base_url || '')}</div></div>
+      <div class="card"><div class="k">生效模型</div><div class="v" style="font-size:16px">${d.source === 'tenant' ? esc(d.model || '') : '<span class="tag ok">平台统一提供</span>'}</div>
+        <div class="muted">${esc(d.base_url || (d.source === 'tenant' ? '' : '接口地址、模型等平台配置不对公司侧展示'))}</div></div>
       <div class="card"><div class="k">API Key</div><div class="v" style="font-size:16px">
         <span class="tag ${d.api_key_set ? 'ok' : 'warn'}">${d.api_key_set ? esc(d.api_key_mask || '已配置') : '未配置'}</span></div>
         <div class="muted">${d.api_key_set ? '已保存，页面不再回显明文' : esc(d.fallback_note || '')}</div></div>
@@ -729,17 +742,12 @@ async function ai() {
     </div>
   </section>
 
-  <section><header><h2>平台统一配置（只读）</h2></header>
-    <p class="hint">由系统管理员在平台后台维护，全平台共用。本公司未填写自定义配置时，自动使用这一份。</p>
+  <section><header><h2>平台统一配置</h2></header>
+    <p class="hint">由系统管理员在平台后台统一维护，全平台共用；本公司未填写自定义配置时自动使用这一份。
+      接口地址、模型、密钥等具体配置属于平台信息，不在公司后台展示。</p>
     <div class="row">
-      <label>服务地址 BaseURL<input value="${esc(p.base_url || '')}" disabled></label>
-      <label>模型 Model<input value="${esc(p.model || '')}" disabled></label>
-      <label>温度 Temperature<input value="${p.temperature ?? ''}" disabled></label>
-      <label>超时(ms)<input value="${p.timeout_ms ?? ''}" disabled></label>
-    </div>
-    <div class="row">
-      <label>API Key<input value="${esc(p.api_key_set ? (p.api_key_mask || '已配置') : '未配置')}" disabled></label>
-      <label>启用 AI<input value="${p.enabled ? '启用' : '停用'}" disabled></label>
+      <label>平台 AI 状态<input value="${p.enabled ? '已启用' : '已停用'}" disabled></label>
+      <label>平台 API Key<input value="${p.api_key_set ? '已配置' : '未配置'}" disabled></label>
       <label>失败兜底<input value="${p.allow_fallback ? '允许' : '不允许'}" disabled></label>
     </div>
   </section>

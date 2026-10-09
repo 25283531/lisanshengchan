@@ -215,13 +215,20 @@ export default function registerAdminRoutes(app, db, ctx) {
     const eff = await resolveAiConfig(db, tid);
     const mine = await readAi(tid);
     const g = await readGlobalAi(db);
+    const effView = publicView(eff.config);
     return ok({
       /** 当前实际生效的配置（脱敏） */
-      ...publicView(eff.config),
+      ...effView,
+      /** 平台的接口地址/模型/密钥不属于本公司信息，公司侧一律不给：
+       *  生效来源是平台时 base_url / model 置空，只有公司自己填的配置才回显 */
+      base_url: eff.source === 'tenant' ? effView.base_url : null,
+      model: eff.source === 'tenant' ? effView.model : null,
       source: eff.source,
       source_zh: eff.source_zh,
-      /** 平台配置（脱敏，公司只能看） */
-      platform: publicView(g) || publicView(null),
+      /** 平台配置只给状态（是否启用/是否配了 Key），不给任何具体配置值 */
+      platform: g
+        ? { enabled: !!num(g.enabled, 0), api_key_set: !!String(g.api_key || '').trim(), allow_fallback: !!num(g.allow_fallback, 1) }
+        : { enabled: false, api_key_set: false, allow_fallback: true },
       /** 本公司自己填的那份（可能为空 = 用平台配置） */
       mine: publicView(mine),
       allow_tenant_override: eff.allow_tenant_override,
