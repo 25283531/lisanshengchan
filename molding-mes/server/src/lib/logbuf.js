@@ -37,11 +37,16 @@ export function pushLog(line) {
   return rec;
 }
 
+/** Fastify 的请求日志：每条请求两行，量最大，界面上可一键滤掉 */
+const REQ_MSGS = new Set(['incoming request', 'request completed']);
+
 /** 取最近的日志：新的在前。level 传 'warn' 表示只看 warn 及以上。 */
-export function readLogs({ limit = 200, level = null } = {}) {
+export function readLogs({ limit = 200, level = null, hideRequests = false } = {}) {
   const order = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
   const min = level ? (order[level] ?? 0) : 0;
-  const picked = min ? buf.filter((r) => (order[r.level] ?? 0) >= min) : buf;
+  let picked = buf;
+  if (min) picked = picked.filter((r) => (order[r.level] ?? 0) >= min);
+  if (hideRequests) picked = picked.filter((r) => !REQ_MSGS.has(r.msg));
   return picked.slice(-Math.min(limit, MAX_LINES)).reverse();
 }
 

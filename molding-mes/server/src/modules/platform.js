@@ -290,10 +290,13 @@ export default function registerPlatformRoutes(app, db, ctx) {
     const q = req.query || {};
     const limit = Math.min(Number(q.limit || 200), 500);
     const level = q.level ? String(q.level) : null;
+    /** requests=0 时滤掉 Fastify 的请求日志（每条请求两行，最容易把业务日志挤掉） */
+    const hideRequests = String(q.requests ?? '1') === '0';
     return ok({
       log_level: ctx.config.logLevel,
       stats: logStats(),
-      items: readLogs({ limit, level }),
+      hide_requests: hideRequests,
+      items: readLogs({ limit, level, hideRequests }),
     });
   }));
 

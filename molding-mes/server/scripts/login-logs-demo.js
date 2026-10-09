@@ -87,6 +87,9 @@ async function main() {
   const warnOnly = await call('GET', '/api/platform/logs?limit=50&level=error', { token: PF });
   const onlyErr = (warnOnly.data?.items || []).every((r) => ['error', 'fatal'].includes(r.level));
   check('按 error 过滤后只剩 error/fatal', onlyErr, `${(warnOnly.data?.items || []).length} 条`);
+  const noReq = await call('GET', '/api/platform/logs?limit=50&requests=0', { token: PF });
+  const noReqMsgs = (noReq.data?.items || []).filter((r) => ['incoming request', 'request completed'].includes(r.msg));
+  check('requests=0 时滤掉请求日志', noReqMsgs.length === 0, `剩 ${(noReq.data?.items || []).length} 条`);
   const noToken = await call('GET', '/api/platform/logs');
   check('未带平台令牌取不到日志', noToken.code === 'PLATFORM_REQUIRED' || noToken.status === 401, String(noToken.code));
 

@@ -1121,7 +1121,8 @@ function tenantResultHtml() {
  */
 async function logsView() {
   const lv = state.logFilter || '';
-  const d = await api('GET', `/api/platform/logs?limit=200${lv ? `&level=${lv}` : ''}`);
+  const hideReq = !!state.logHideReq;
+  const d = await api('GET', `/api/platform/logs?limit=200${lv ? `&level=${lv}` : ''}${hideReq ? '&requests=0' : ''}`);
   const items = d.items || [];
   return `
   <section><header><h2>运行日志</h2><span class="spacer"></span>
@@ -1130,6 +1131,7 @@ async function logsView() {
     <button id="lg-all" style="width:auto" class="${lv ? '' : 'primary'}">全部</button>
     <button id="lg-warn" style="width:auto" class="${lv === 'warn' ? 'primary' : ''}">只看告警</button>
     <button id="lg-err" style="width:auto" class="${lv === 'error' ? 'primary' : ''}">只看错误</button>
+    <button id="lg-req" style="width:auto" class="${hideReq ? 'primary' : ''}">${hideReq ? '含请求日志' : '隐藏请求日志'}</button>
   </header>
     <table><thead><tr><th>时间</th><th>级别</th><th>内容</th><th class="num">状态</th><th>请求</th></tr></thead>
     <tbody>${items.map((r) => `<tr>
@@ -1149,6 +1151,7 @@ function bindLogs() {
   $('#lg-all').addEventListener('click', () => { state.logFilter = ''; render(); });
   $('#lg-warn').addEventListener('click', () => { state.logFilter = 'warn'; render(); });
   $('#lg-err').addEventListener('click', () => { state.logFilter = 'error'; render(); });
+  $('#lg-req').addEventListener('click', () => { state.logHideReq = !state.logHideReq; render(); });
 }
 /** pino 的 time 是毫秒时间戳，也可能是 ISO 串（兜底路径） */
 function fmtLogTime(t) {
